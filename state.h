@@ -19,70 +19,109 @@ struct CarState {
 inline bool estimateTimedState(const float left[K], const float right[K],
 		const float speedLeft[K], const float speedRight[K],
 		const uint32_t timeUs[K], CarState &output) {
-	if (K < 3 || W <= 0) return false;
+	if (K < 3 || W <= 0)
+		return false;
+
 	const uint32_t spanUs = timeUs[K - 1] - timeUs[0];
-	if (spanUs == 0 || spanUs > 10000000UL) return false;
+	if (spanUs == 0 || spanUs > 10000000UL)
+		return false;
+
 	const float span = spanUs * 1e-6f;
+	
 	float moments[5] = {}, rhs[3] = {};
 	float sumV = 0, sumUV = 0, sumA = 0, sumUA = 0;
-	for (int i = 0; i < K; ++i) {
-		if (!isfinite(left[i]) || !isfinite(right[i])
-			|| !isfinite(speedLeft[i]) || !isfinite(speedRight[i])) return false;
+	for (int i = 0; i < K; i++) {
+		if (!isfinite(left[i]) || !isfinite(right[i]) ||
+				!isfinite(speedLeft[i]) || !isfinite(speedRight[i]))
+			return false;
+		
 		const uint32_t offset = timeUs[i] - timeUs[0];
-		if (offset > spanUs || (i > 0 && offset <= timeUs[i-1] - timeUs[0])) return false;
+		if (offset > spanUs || (i > 0 && offset <= timeUs[i - 1] - timeUs[0]))
+			return false;
+		
 		// 将时间归一化到 [-1, 0]，避免微秒量级造成矩阵病态。
 		const float u = static_cast<float>(offset) / spanUs - 1.0f;
 		const float x = (right[i] - left[i]) * 0.5f;
 		const float v = (speedLeft[i] + speedRight[i]) * 0.5f;
 		const float a = (speedRight[i] - speedLeft[i]) / W;
 		float power = 1;
+
 		for (int j = 0; j < 5; ++j) {
 			moments[j] += power;
 			if (j < 3) rhs[j] += power * x;
 			power *= u;
 		}
-		sumV += v; sumUV += u * v;
-		sumA += a; sumUA += u * a;
+
+		sumV += v;
+		sumUV += u * v;
+		sumA += a;
+		sumUA += u * a;
 	}
+
 	float matrix[3][4];
-	for (int i = 0; i < 3; ++i) {
-		for (int j = 0; j < 3; ++j) matrix[i][j] = moments[i+j];
+	for (int i = 0; i < 3; i++) {
+		for (int j = 0; j < 3; j++)
+			matrix[i][j] = moments[i + j];
+		
 		matrix[i][3] = rhs[i];
 	}
-	// 带选主元的消元法，求 x = A + B*u + C*u*u。
-	for (int column = 0; column < 3; ++column) {
+
+	// 带选主元的消元法，求 x = A + (B * u) + (C * u * u)
+	for (int column = 0; column < 3; column++) {
 		int pivot = column;
-		for (int row = column + 1; row < 3; ++row)
-			if (fabsf(matrix[row][column]) > fabsf(matrix[pivot][column])) pivot = row;
-		if (fabsf(matrix[pivot][column]) < 1e-6f) return false;
+		for (int row = column + 1; row < 3; row++)
+			if (fabsf(matrix[row][column]) > fabsf(matrix[pivot][column]))
+				pivot = row;
+		
+		if (fabsf(matrix[pivot][column]) < 1e-6f)
+			return false;
+		
 		for (int j = 0; j < 4; ++j) {
 			float temp = matrix[column][j];
-			matrix[column][j] = matrix[pivot][j]; matrix[pivot][j] = temp;
+			matrix[column][j] = matrix[pivot][j];
+			matrix[pivot][j] = temp;
 		}
+
 		const float divisor = matrix[column][column];
-		for (int j = column; j < 4; ++j) matrix[column][j] /= divisor;
+
+		for (int j = column; j < 4; j++)
+			matrix[column][j] /= divisor;
+		
 		for (int row = 0; row < 3; ++row) {
-			if (row == column) continue;
+			if (row == column)
+				continue;
+			
 			const float factor = matrix[row][column];
-			for (int j = column; j < 4; ++j) matrix[row][j] -= factor * matrix[column][j];
+			for (int j = column; j < 4; j++)
+				matrix[row][j] -= factor * matrix[column][j];
 		}
 	}
+
 	const float denominator = K * moments[2] - moments[1] * moments[1];
-	if (denominator <= 1e-6f) return false;
+	if (denominator <= 1e-6f)
+		return false;
+	
 	const float vSlope = (K * sumUV - moments[1] * sumV) / denominator;
 	const float aSlope = (K * sumUA - moments[1] * sumA) / denominator;
+
 	CarState next;
 	next.x = matrix[0][3];
 	next.v = (sumV - vSlope * moments[1]) / K;
 	next.alpha = (sumA - aSlope * moments[1]) / K;
-	if (fabsf(next.v) < 0.1f) return false;
+
+	if (fabsf(next.v) < 0.1f)
+		return false;
+	
 	const float xDot = matrix[1][3] / span;
 	const float xDDot = 2 * matrix[2][3] / (span * span);
 	next.theta = xDot / next.v;
 	next.kappa = next.alpha / next.v - xDDot / (next.v * next.v)
 		+ xDot * (vSlope / span) / (next.v * next.v * next.v);
-	if (!isfinite(next.x) || !isfinite(next.v) || !isfinite(next.alpha)
-		|| !isfinite(next.theta) || !isfinite(next.kappa)) return false;
+	
+	if (!isfinite(next.x) || !isfinite(next.v) || !isfinite(next.alpha) ||
+			!isfinite(next.theta) || !isfinite(next.kappa)) 
+		return false;
+	
 	output = next;
 	return true;
 }
@@ -158,8 +197,8 @@ bool estimateState(const float dl[K], const float dr[K],
 	float v = state.v;
 	state.kappa =
 		state.alpha / v
-		- xDDot / (v*v)
-		+ xDot * vDot / (v*v*v);
+		- xDDot / (v * v)
+		+ xDot * vDot / (v * v * v);
 
 	return true;
 }

@@ -64,7 +64,8 @@ SteeringResult calculateSteering(
 	if (fabsf(a) < 0.001f) {
 		Xt = lookahead;
 		Yt = 0.5f * kappa * lookahead * lookahead;
-	} else {
+	}
+	else {
 		Xt = sinf(a) / kappa;
 		Yt = (1.0f - cosf(a)) / kappa;
 	}

@@ -169,12 +169,11 @@ inline bool readSpeeds(float &vMotorA, float &vMotorB) {
 	detail::previousTimeUs = counts.timeUs;
 
 	const float seconds = elapsedUs * 1.0e-6f;
-	const float pi = 3.14159265359f;
 	const float motorASpeed = static_cast<float>(deltaMotorA) * motorACalibration.direction
-		* (pi * motorACalibration.diameterMetres / motorACalibration.countsPerWheelRev)
+		* (PI * motorACalibration.diameterMetres / motorACalibration.countsPerWheelRev)
 		/ seconds;
 	const float motorBSpeed = static_cast<float>(deltaMotorB) * motorBCalibration.direction
-		* (pi * motorBCalibration.diameterMetres / motorBCalibration.countsPerWheelRev)
+		* (PI * motorBCalibration.diameterMetres / motorBCalibration.countsPerWheelRev)
 		/ seconds;
 	
 	if (!isfinite(motorASpeed) || !isfinite(motorBSpeed))

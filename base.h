@@ -13,6 +13,7 @@ constexpr float W = 0.2f, L = 0.3f; // TODO: 实测
 float dl[K], dr[K], vl[K], vr[K];
 
 namespace ports {
+
 // 舵机
 constexpr int SERVO = 9;
 
@@ -35,9 +36,12 @@ constexpr int PWMA = 5, PWMB = 6; // analog output
 constexpr int AIN_1 = 4, AIN_2 = 7; // output
 constexpr int BIN_1 = 8, BIN_2 = 12; // output
 constexpr int STBY = 13; // output
+
 }
 
 namespace devices {
-	VL53L0X tof1, tof2;
-	Servo servo;
+
+VL53L0X tof1, tof2;
+Servo servo;
+
 }

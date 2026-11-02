@@ -1,7 +1,8 @@
 #pragma once
 
-#include "base.h"
 #include <math.h>
+
+#include "base.h"
 
 namespace ultrasonic {
 
@@ -14,7 +15,9 @@ constexpr unsigned long ECHO_TIMEOUT_US = 50000UL; // 50ms
 inline bool readDistance(float &distanceMetres,
 						 unsigned long timeoutUs = ECHO_TIMEOUT_US) {
 	distanceMetres = NAN;
-	if (timeoutUs == 0) return false;
+
+	if (timeoutUs == 0)
+		return false;
 
 	digitalWrite(ports::ULTRASONIC_TRIG, LOW);
 	delayMicroseconds(2);
@@ -22,9 +25,10 @@ inline bool readDistance(float &distanceMetres,
 	delayMicroseconds(10);
 	digitalWrite(ports::ULTRASONIC_TRIG, LOW);
 
-	const unsigned long duration =
-		pulseIn(ports::ULTRASONIC_ECHO, HIGH, timeoutUs);
-	if (duration == 0) return false;
+	const unsigned long duration = pulseIn(ports::ULTRASONIC_ECHO, HIGH, timeoutUs);
+	
+	if (duration == 0)
+		return false;
 
 	// 测试代码以 duration / 58 得到厘米，再除以 100 转为米。
 	distanceMetres = duration / 5800.0f;

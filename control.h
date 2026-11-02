@@ -1,14 +1,18 @@
 #pragma once
 
 #include <math.h>
+
 #include "base.h"
+
+#include "state.h"
+#include "pure_pursuit.h"
+
 #include "tof.h"
 #include "ultrasonic.h"
 #include "encoder.h"
 #include "servo.h"
 #include "motor.h"
-#include "state.h"
-#include "pure_pursuit.h"
+
 #include "speed_fallback.h"
 
 namespace control {
@@ -119,6 +123,7 @@ inline float evaluate(int interval, float wheelDeg, const float slopes[]) {
 // 失败时输出为 NAN；调用方必须检查返回值，成功后才能使用输出。
 inline bool interpolateSteering(float input, bool wheelToServo, float &output) {
 	output = NAN;
+
 	if (!isfinite(input) || !steeringCalibrationReady())
 			return false;
 	
@@ -130,11 +135,22 @@ inline bool interpolateSteering(float input, bool wheelToServo, float &output) {
 		const SteeringCalibrationPoint &b = steeringCalibration[i];
 		const float x0 = wheelToServo ? a.wheelDeg : a.servoDeg;
 		const float x1 = wheelToServo ? b.wheelDeg : b.servoDeg;
-		if (input < fminf(x0, x1) || input > fmaxf(x0, x1)) continue;
-		if (input == x0) { output = wheelToServo ? a.servoDeg : a.wheelDeg; return true; }
-		if (input == x1) { output = wheelToServo ? b.servoDeg : b.wheelDeg; return true; }
+		
+		if (input < fminf(x0, x1) || input > fmaxf(x0, x1))
+			continue;
+		
+		if (input == x0) {
+			output = wheelToServo ? a.servoDeg : a.wheelDeg;
+			return true;
+		}
+
+		if (input == x1) {
+			output = wheelToServo ? b.servoDeg : b.wheelDeg;
+			return true;
+		}
+
 		if (wheelToServo) {
-			output = steeringDetail::evaluate(i-1, input, slopes);
+			output = steeringDetail::evaluate(i - 1, input, slopes);
 		}
 		else {
 			float low = a.wheelDeg, high = b.wheelDeg;
@@ -163,7 +179,7 @@ inline bool interpolateSteering(float input, bool wheelToServo, float &output) {
 
 // 将 BicycleResult::phi 转换为舵机角度；调用 write() 时将 servoDeg 四舍五入。
 inline bool wheelAngleToServo(float phiRad, float &servoDeg) {
-	return interpolateSteering(phiRad * (180.0f / 3.14159265359f),
+	return interpolateSteering(phiRad * (180.0f / PI),
 			true, servoDeg);
 }
 
@@ -176,7 +192,7 @@ inline bool servoAngleToWheel(float servoDeg, float &phiRad) {
 		return false;
 	}
 
-	phiRad = wheelDeg * (3.14159265359f / 180.0f);
+	phiRad = wheelDeg * (PI / 180.0f);
 
 	return true;
 }
@@ -199,13 +215,12 @@ struct BicycleResult {
 inline bool calculateBicycleModel(
 		float v, float phi, float wheelbase, float trackWidth,
 		float maxSteer, BicycleResult &result) {
-	const float halfPi = 1.57079632679f;
 	result = BicycleResult{};
 
 	if (!isfinite(v) || !isfinite(phi) || !isfinite(wheelbase) ||
 			!isfinite(trackWidth) || !isfinite(maxSteer) ||
 			wheelbase <= 0.0f || trackWidth <= 0.0f ||
-			maxSteer < 0.0f || maxSteer >= halfPi) {
+			maxSteer < 0.0f || maxSteer >= HALF_PI) {
 		return false;
 	}
 
@@ -273,7 +288,7 @@ constexpr float REVERSE_SPEED_LIMIT = 0.10f; // 任一轮低于 -0.10 m/s 才判
 constexpr float ESTIMATION_FALLBACK_SPEED_LIMIT = 0.20f; // 估计失败时允许简化纠偏的速度上限
 constexpr float ACCELERATION = 0.15f; // m/s²
 constexpr float MAX_STEER = 0.34f; // 弧度，约 19.5 度，留在当前 ±20 度标定范围内
-constexpr float MAX_STEER_RATE = 30.0f * 3.14159265359f / 180.0f; // 前轮转角最大变化率：30 度/秒
+constexpr float MAX_STEER_RATE = 30.0f * PI / 180.0f; // 前轮转角最大变化率：30 度/秒
 
 // 启发式优化：如果持续接近道路中心，则减弱转向幅度
 constexpr float CENTRE_OFFSET_LIMIT = 0.03f; // 历史样本均在中心 ±3 cm 内
@@ -403,20 +418,24 @@ inline bool start(float targetSpeed) {
 	float centre, leftLimit, rightLimit;
 	if (!encoder::calibrationReady()) {
 		Serial.println(F("Control start: invalid encoder calibration."));
-		stop(Status::CalibrationMissing); return false;
+		stop(Status::CalibrationMissing);
+		return false;
 	}
 	if (!steeringCalibrationReady()) {
 		Serial.println(F("Control start: invalid steering calibration table."));
-		stop(Status::CalibrationMissing); return false;
+		stop(Status::CalibrationMissing);
+		return false;
 	}
 	if (!wheelAngleToServo(0, centre)) {
 		Serial.println(F("Control start: steering calibration does not cover centre."));
-		stop(Status::CalibrationMissing); return false;
+		stop(Status::CalibrationMissing);
+		return false;
 	}
 	if (!wheelAngleToServo(MAX_STEER, leftLimit)
 		|| !wheelAngleToServo(-MAX_STEER, rightLimit)) {
 		Serial.println(F("Control start: MAX_STEER exceeds calibrated wheel angles."));
-		stop(Status::CalibrationMissing); return false;
+		stop(Status::CalibrationMissing);
+		return false;
 	}
 
 	if (!encoder::setup()) {
@@ -447,12 +466,18 @@ inline bool start(float targetSpeed) {
 
 // 条件积分抗饱和；仅驱动前进，减速时最低输出为零。
 inline int speedPI(float target, float measured, float dt, float &integral) {
-	if (target <= 0) { integral = 0; return 0; }
+	if (target <= 0) {
+		integral = 0;
+		return 0;
+	}
+
 	const float error = target - measured;
 	const float proposed = integral + SPEED_KI * error * dt;
 	const float raw = SPEED_KP * error + proposed;
-	if ((raw >= 0 && raw <= MAX_PWM) || (raw > MAX_PWM && error < 0)
-		|| (raw < 0 && error > 0)) integral = proposed;
+
+	if ((raw >= 0 && raw <= MAX_PWM) || (raw > MAX_PWM && error < 0) || (raw < 0 && error > 0))
+		integral = proposed;
+
 	integral = fmaxf(-MAX_PWM, fminf(integral, MAX_PWM));
 	return static_cast<int>(lroundf(fmaxf(0, fminf(MAX_PWM, SPEED_KP * error + integral))));
 }
@@ -604,6 +629,7 @@ inline void update() {
 	const bool validSpeeds = encoder::readSpeeds(speedMotorA, speedMotorB);
 	speedLeft = MOTOR_A_IS_LEFT ? speedMotorA : speedMotorB;
 	speedRight = MOTOR_A_IS_LEFT ? speedMotorB : speedMotorA;
+	
 	if (!validSpeeds ||
 			!isfinite(speedLeft) || !isfinite(speedRight)) {
 		runtime::telemetry.measuredLeft = speedLeft;
@@ -611,94 +637,136 @@ inline void update() {
 		failDrive(DriveFaultCause::SpeedRead);
 		return;
 	}
+
 	const uint32_t sampledAt = static_cast<uint32_t>(micros());
 	const uint32_t elapsedUs = sampledAt - runtime::lastSampleUs;
-	if (elapsedUs > MAX_CONTROL_GAP_US) { stop(Status::TimingFault); return; }
+
+	if (elapsedUs > MAX_CONTROL_GAP_US) {
+		stop(Status::TimingFault);
+		return;
+	}
+
 	const float dt = elapsedUs * 1e-6f;
+
 	runtime::lastSampleUs = sampledAt;
 	runtime::telemetry.encoderLeft = speedLeft;
 	runtime::telemetry.encoderRight = speedRight;
+
 	const bool wasFallbackLeft = runtime::fallbackLeft.active;
 	const bool wasFallbackRight = runtime::fallbackRight.active;
-	speedLeft = runtime::fallbackLeft.observe(speedLeft, runtime::telemetry.pwmLeft,
-											  runtime::telemetry.targetLeft, dt);
-	speedRight = runtime::fallbackRight.observe(speedRight, runtime::telemetry.pwmRight,
-												runtime::telemetry.targetRight, dt);
+
+	speedLeft = runtime::fallbackLeft.observe(speedLeft, runtime::telemetry.pwmLeft, runtime::telemetry.targetLeft, dt);
+	speedRight = runtime::fallbackRight.observe(speedRight, runtime::telemetry.pwmRight, runtime::telemetry.targetRight, dt);
+	
 	// 恢复实测时清除该侧旧积分，避免从故障前的积分突然恢复输出。
-	if (wasFallbackLeft != runtime::fallbackLeft.active) runtime::leftIntegral = 0;
-	if (wasFallbackRight != runtime::fallbackRight.active) runtime::rightIntegral = 0;
+	if (wasFallbackLeft != runtime::fallbackLeft.active)
+		runtime::leftIntegral = 0;
+	if (wasFallbackRight != runtime::fallbackRight.active)
+		runtime::rightIntegral = 0;
+	
 	runtime::telemetry.fallbackLeft = runtime::fallbackLeft.active;
 	runtime::telemetry.fallbackRight = runtime::fallbackRight.active;
 	runtime::telemetry.fallbackLeftMeasured = runtime::fallbackLeft.referenceMeasured;
 	runtime::telemetry.fallbackRightMeasured = runtime::fallbackRight.referenceMeasured;
-	const bool degradedSpeed = runtime::fallbackLeft.active || runtime::fallbackRight.active
-		|| runtime::fallbackLeft.missingSeconds > 0 || runtime::fallbackRight.missingSeconds > 0;
-	if (degradedSpeed) runtime::encoderOnlySamples = 0;
-	else if (runtime::encoderOnlySamples < K) ++runtime::encoderOnlySamples;
+
+	const bool degradedSpeed = runtime::fallbackLeft.active || runtime::fallbackRight.active ||
+		runtime::fallbackLeft.missingSeconds > 0 || runtime::fallbackRight.missingSeconds > 0;
+	if (degradedSpeed)
+		runtime::encoderOnlySamples = 0;
+	else if (runtime::encoderOnlySamples < K)
+		runtime::encoderOnlySamples++;
+	
 	const float left = TOF1_IS_LEFT ? first : second;
 	const float right = TOF1_IS_LEFT ? second : first;
+
 	// 复用已有历史数组，最旧样本在下标 0。
 	if (runtime::sampleCount == K) {
 		for (int i = 1; i < K; i++) {
-			dl[i-1] = dl[i]; dr[i-1] = dr[i];
-			vl[i-1] = vl[i]; vr[i-1] = vr[i];
-			runtime::timestamps[i-1] = runtime::timestamps[i];
+			dl[i - 1] = dl[i];
+			dr[i - 1] = dr[i];
+			vl[i - 1] = vl[i];
+			vr[i - 1] = vr[i];
+			runtime::timestamps[i - 1] = runtime::timestamps[i];
 		}
-	} else ++runtime::sampleCount;
+	}
+	else
+		runtime::sampleCount++;
+	
 	const int tail = runtime::sampleCount - 1;
-	dl[tail] = left; dr[tail] = right;
-	vl[tail] = speedLeft; vr[tail] = speedRight;
+	dl[tail] = left;
+	dr[tail] = right;
+	vl[tail] = speedLeft;
+	vr[tail] = speedRight;
 	runtime::timestamps[tail] = sampledAt;
 	runtime::telemetry.measuredLeft = speedLeft;
 	runtime::telemetry.measuredRight = speedRight;
-	if (runtime::sampleCount < K) return;
+	
+	if (runtime::sampleCount < K)
+		return;
 
 	state::CarState estimated = {};
 	// 历史中含估算/疑似掉线数据时，不用轮速差推断道路曲率。
 	const bool encoderHistoryReady = runtime::encoderOnlySamples >= K;
 	const bool fullEstimate = encoderHistoryReady && state::estimateTimedState(dl, dr, vl, vr,
-													   runtime::timestamps, estimated);
+			runtime::timestamps, estimated);
+
 	if (!fullEstimate) {
 		// 估计失败且速度低于配置上限时，以横向偏移纠偏；偏角和曲率置零为近似。
 		const float measuredSpeed = (speedLeft + speedRight) * 0.5f;
+
 		if (encoderHistoryReady && fabsf(measuredSpeed) >= ESTIMATION_FALLBACK_SPEED_LIMIT) {
-			stop(Status::EstimationFault); return;
+			stop(Status::EstimationFault);
+			return;
 		}
+
 		estimated.x = (right - left) * 0.5f;
 		estimated.v = measuredSpeed;
 		estimated.alpha = encoderHistoryReady ? (speedRight - speedLeft) / W : 0;
 		runtime::filteredKappa = 0;
-	} else {
+	}
+	else {
 		const float weight = dt / (0.3f + dt);
 		runtime::filteredKappa += weight * (estimated.kappa - runtime::filteredKappa);
 	}
+
 	runtime::telemetry.car = estimated;
 	runtime::telemetry.status = fullEstimate ? Status::Running : Status::LowSpeed;
+
 	const float curvatureWeight = updateCurvatureWeight(dt);
 	const float steeringKappa = runtime::filteredKappa * curvatureWeight;
+
 	const float lookahead = pure_pursuit::calculateLookahead(estimated.v, steeringKappa);
 	const pure_pursuit::SteeringResult steering = pure_pursuit::calculateSteering(
 		estimated.x, estimated.theta, steeringKappa, L, lookahead, MAX_STEER);
+	
 	if (!isfinite(steering.phi) || !isfinite(steering.curvature)) {
-		stop(Status::EstimationFault); return;
+		stop(Status::EstimationFault);
+		return;
 	}
+
 	runtime::rampedSpeed = fminf(runtime::requestedSpeed,
 							   runtime::rampedSpeed + ACCELERATION * dt);
+
 	BicycleResult command;
 	float servoDegrees;
 	const float limitedPhi = limitSteeringRate(steering.phi, dt);
-	if (!calculateBicycleModel(runtime::rampedSpeed, limitedPhi, L, W, MAX_STEER, command)
-		|| !wheelAngleToServo(command.phi, servoDegrees)) {
-		stop(Status::EstimationFault); return;
+
+	if (!calculateBicycleModel(runtime::rampedSpeed, limitedPhi, L, W, MAX_STEER, command) ||
+			!wheelAngleToServo(command.phi, servoDegrees)) {
+		stop(Status::EstimationFault);
+		return;
 	}
+
 	// 同比限制两轮速度，保留内外轮速度比例。
 	const float largest = fmaxf(command.vl, command.vr);
 	if (largest > MAX_TARGET_SPEED) {
 		command.vl *= MAX_TARGET_SPEED / largest;
 		command.vr *= MAX_TARGET_SPEED / largest;
 	}
+	
 	if (speedLeft < -REVERSE_SPEED_LIMIT || speedRight < -REVERSE_SPEED_LIMIT) {
-		failDrive(DriveFaultCause::ReverseFeedback); return;
+		failDrive(DriveFaultCause::ReverseFeedback);
+		return;
 	}
 
 	// 调试期间暂停无运动超时检查，方便拿起小车测试；需要时取消注释恢复。

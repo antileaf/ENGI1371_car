@@ -12,6 +12,7 @@ inline bool readDistance(VL53L0X &sensor, float &distanceMetres) {
 	distanceMetres = NAN;
 
 	const uint16_t distanceMm = sensor.readRangeContinuousMillimeters();
+
 	if (sensor.timeoutOccurred())
 		return false;
 
@@ -42,7 +43,6 @@ void enableSensor(int pin) {
 }
 
 void setup_late() {
-	
 	// 先关闭全部传感器
 	disableSensor(ports::XSHUT_1);
 	disableSensor(ports::XSHUT_2);
@@ -58,7 +58,7 @@ void setup_late() {
 
 	if (!devices::tof1.init()) {
 		Serial.println("Sensor 1 initialization failed!");
-		while (true) {}
+		while (true) { }
 	}
 
 	devices::tof1.setAddress(0x30);
@@ -68,7 +68,7 @@ void setup_late() {
 
 	if (!devices::tof2.init()) {
 		Serial.println("Sensor 2 initialization failed!");
-		while (true) {}
+		while (true) { }
 	}
 
 	devices::tof2.setAddress(0x31);
