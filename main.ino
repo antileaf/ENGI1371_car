@@ -4,17 +4,14 @@
 #include "tof.h"
 #include "servo.h"
 #include "motor.h"
-#include "encoder.h"
 
-#include "state.h"
-#include "pure_pursuit.h"
 #include "control.h"
 #include "hardware_test.h"
 #include "runtime_debug.h"
 
-// true：传感器、电机、编码器联合测试，不执行其它逻辑
+// true：传感器、电机联合测试，不执行其它逻辑
 constexpr bool hardware_test_mode = false;
-constexpr float target_speed = 0.24f; // 目标速度
+// 前进 PWM 在 control.h 的 DEFAULT_PWM_A/B 中配置。
 
 void setup() {
 	ultrasonic::setup_early();
@@ -23,21 +20,14 @@ void setup() {
 
 	Serial.begin(115200);
 
-	if (!encoder::setup()) {
-		Serial.println("Encoder interrupt setup failed!");
-		motor::stopMotors();
-		while (true) {}
-	}
-
 	ultrasonic::setup_late();
 	tof::setup_late();
 	servo::setup_late();
 	motor::setup_late();
-	encoder::resetSpeedWindow();
 
 	if (hardware_test_mode)
 		hardware_test::setup();
-	else if (!control::start(target_speed))
+	else if (!control::start())
 		Serial.println("Control start failed: check calibration and configuration.");
 }
 
@@ -62,9 +52,3 @@ void loop() {
 		previousStatus = status;
 	}
 }
-
-// v = (v_l + v_r) / 2
-// 车辆偏移 x = (d_r - d_l) / 2 cosθ ≈ (d_r - d_l) / 2
-// 车辆角速度 alpha = (v_r - v_l) / W
- 
-// 车辆偏角 θ = arcsin(x' / v) ≈ x' / v, θ_k ≈ (x_k - x_{k - 1}) / v_k Δt

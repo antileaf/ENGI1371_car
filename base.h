@@ -4,14 +4,6 @@
 #include <Servo.h>
 #include <VL53L0X.h>
 
-constexpr int DATA_PER_SEC = 20;
-constexpr int DATA_SEP = 1000 / DATA_PER_SEC;
-constexpr int K = 10;
-
-constexpr float W = 0.2f, L = 0.3f; // TODO: 实测
-
-float dl[K], dr[K], vl[K], vr[K];
-
 namespace ports {
 // 舵机
 constexpr int SERVO = 9;
@@ -25,10 +17,6 @@ constexpr int XSHUT_1 = A2; // output
 constexpr int SDA_1 = SDA, SCL_1 = SCL;
 constexpr int XSHUT_2 = A3; // output
 constexpr int SDA_2 = A4, SCL_2 = A5;
-
-// 编码器
-constexpr int ENCODER_A1 = 2, ENCODER_B1 = A0;
-constexpr int ENCODER_A2 = 3, ENCODER_B2 = A1;
 
 // 驱动板
 constexpr int PWMA = 5, PWMB = 6; // analog output
