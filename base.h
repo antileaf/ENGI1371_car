@@ -1,5 +1,7 @@
 #pragma once
 
+#include "calibration.h"
+
 #include <Wire.h>
 #include <Servo.h>
 #include <VL53L0X.h>
@@ -8,7 +10,9 @@ constexpr int DATA_PER_SEC = 20;
 constexpr int DATA_SEP = 1000 / DATA_PER_SEC;
 constexpr int K = 10;
 
-constexpr float W = 0.2f, L = 0.3f; // TODO: 实测
+// 保留原名称，尺寸统一在 calibration.h 中修改。
+using calibration::W;
+using calibration::L;
 
 float dl[K], dr[K], vl[K], vr[K];
 

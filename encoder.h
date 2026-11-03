@@ -11,33 +11,12 @@
 
 namespace encoder {
 
-// 编码器 1 对应电机 A，编码器 2 对应电机 B；接口始终按 A、B 顺序输出。
-// 使用 A 相上升沿中断、读取 B 相判向，即单倍频计数。
-// GM37-520 有不同编码器及减速比版本，不能仅凭型号确定每圈计数。
-// 若资料给出电机轴 A 相每圈 P 个脉冲、减速比 G，且车轮直连输出轴，
-// 则本接口的每轮计数为 P * G，不乘 2 或 4。
-// 也可以让车轮沿同一方向转若干整圈，用原始计数变化除以圈数标定。
-struct WheelCalibration {
-	float diameterMetres;     // 车轮有效直径，单位：米
-	float countsPerWheelRev;  // 车轮转一圈的 A 相上升沿数量
-	int direction;           // 方向修正：只能填 +1 或 -1，使前进轮速为正
-};
-
-// 厂家参数：https://www.xytmotors.com/encoder/151.html
-// 12 V、空载 178 rpm 对应 JGB37-520-12100，标称减速比为 56:1。
-// 页面参数表及尺寸图未注明电机轴 A 相每圈脉冲数，暂定 11。
-constexpr float GEAR_RATIO = 56.0f;
-const float MOTOR_SHAFT_PULSES_PER_REV = 11; // TODO: to be determined
-const float COUNTS_PER_WHEEL_REV = MOTOR_SHAFT_PULSES_PER_REV * GEAR_RATIO;
-
-// 车轮直径已确认为 65 mm，假设车轮直连减速箱输出轴。
-// 确认脉冲数后更新上面的暂定值，或分别将 A/B 的每轮计数替换为实测值。
-// 电机降压至 5 V 不改变每圈计数，也无需对测速结果乘电压比例。
-// 未标定时仍可读取原始计数；方向修正需按实车前进方向检查。
-// 电机 A（编码器 1）前进时原始计数为正，方向系数为 +1。
-const WheelCalibration motorACalibration  = {0.065f, COUNTS_PER_WHEEL_REV, +1};
-// 电机 B（编码器 2）前进时原始计数为负，方向系数为 -1。
-const WheelCalibration motorBCalibration = {0.065f, COUNTS_PER_WHEEL_REV, -1};
+using calibration::WheelCalibration;
+using calibration::GEAR_RATIO;
+using calibration::MOTOR_SHAFT_PULSES_PER_REV;
+using calibration::COUNTS_PER_WHEEL_REV;
+using calibration::motorACalibration;
+using calibration::motorBCalibration;
 
 // 最小测速间隔为 10 ms；实际速度使用两次采样之间的真实时间计算。
 constexpr uint32_t MIN_SAMPLE_US = 10000UL;

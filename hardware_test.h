@@ -9,7 +9,7 @@
 namespace hardware_test {
 
 constexpr int TEST_PWM = 50; // 沿用原电机测试的 PWM
-constexpr int SERVO_ANGLE = 75; // 保留当前舵机测试角度，可在此调整
+constexpr int SERVO_ANGLE = static_cast<int>(calibration::SERVO_CENTRE_DEG); // 保留当前舵机测试角度，可在此调整
 constexpr uint32_t OUTPUT_PERIOD_MS = 250;
 constexpr uint32_t RUN_MS = 5000, PAUSE_MS = 3000, CYCLE_PAUSE_MS = 10000;
 // 阶段：A 正转、停、A 反转、停、B 正转、停、B 反转、停、双电机正转、停。
@@ -22,8 +22,8 @@ inline void applyPhase() {
 	// pwmA = phase == 0 || phase == 8 ? TEST_PWM : phase == 2 ? -TEST_PWM : 0;
 	// pwmB = phase == 4 || phase == 8 ? TEST_PWM : phase == 6 ? -TEST_PWM : 0;
 
-	pwmA = TEST_PWM;
-	pwmB = -TEST_PWM;
+	pwmA = -TEST_PWM;
+	pwmB = TEST_PWM;
 
 	motor::motorA(pwmA);
 	motor::motorB(pwmB);

@@ -17,21 +17,13 @@
 
 namespace control {
 
-struct SteeringCalibrationPoint {
-	float wheelDeg; // 等效前轮转角，左转为正，单位：度
-	float servoDeg; // 传给 Servo::write() 的舵机指令角度，单位：度
-};
-
-// 标定时统一使用自行车模型的等效前轮转角，
-// 并非阿克曼转向机构的内外侧前轮实际转角。
-const SteeringCalibrationPoint steeringCalibration[] = {
-	{-20.0f, 120.0}, // 右转 20 度
-	{-10.0f, 100.0}, // 右转 10 度
-	{  0.0f, 75.0}, // 前轮归中
-	{ 10.0f, 50.0}, // 左转 10 度
-	{ 20.0f, 40.0}  // 左转 20 度
-};
-constexpr int STEERING_POINT_COUNT = sizeof(steeringCalibration) / sizeof(steeringCalibration[0]);
+using calibration::steeringCalibration;
+using calibration::STEERING_POINT_COUNT;
+using calibration::TOF1_IS_LEFT;
+using calibration::MOTOR_A_IS_LEFT;
+using calibration::LEFT_MOTOR_DIRECTION;
+using calibration::RIGHT_MOTOR_DIRECTION;
+using calibration::MAX_STEER;
 
 // PCHIP 保形三次插值经过所有实测点，连接处一阶导数连续。
 // 随着前轮向左转，舵机指令角度可以递增或递减，
@@ -39,7 +31,7 @@ constexpr int STEERING_POINT_COUNT = sizeof(steeringCalibration) / sizeof(steeri
 inline bool steeringCalibrationReady() {
 	float direction = 0.0f;
 	for (int i = 0; i < STEERING_POINT_COUNT; i++) {
-		const SteeringCalibrationPoint &p = steeringCalibration[i];
+		const auto &p = steeringCalibration[i];
 
 		if (!isfinite(p.wheelDeg) || !isfinite(p.servoDeg) ||
 				p.servoDeg < 0.0f || p.servoDeg > 180.0f)
@@ -101,8 +93,8 @@ inline void calculateSlopes(float slopes[STEERING_POINT_COUNT]) {
 
 // 在指定区间计算三次 Hermite 曲线；仅供已验证范围的内部调用。
 inline float evaluate(int interval, float wheelDeg, const float slopes[]) {
-	const SteeringCalibrationPoint &a = steeringCalibration[interval];
-	const SteeringCalibrationPoint &b = steeringCalibration[interval + 1];
+	const auto &a = steeringCalibration[interval];
+	const auto &b = steeringCalibration[interval + 1];
 	const float h = b.wheelDeg - a.wheelDeg;
 	const float t = (wheelDeg - a.wheelDeg) / h;
 	const float change = b.servoDeg - a.servoDeg;
@@ -131,8 +123,8 @@ inline bool interpolateSteering(float input, bool wheelToServo, float &output) {
 	steeringDetail::calculateSlopes(slopes);
 
 	for (int i = 1; i < STEERING_POINT_COUNT; i++) {
-		const SteeringCalibrationPoint &a = steeringCalibration[i - 1];
-		const SteeringCalibrationPoint &b = steeringCalibration[i];
+		const auto &a = steeringCalibration[i - 1];
+		const auto &b = steeringCalibration[i];
 		const float x0 = wheelToServo ? a.wheelDeg : a.servoDeg;
 		const float x1 = wheelToServo ? b.wheelDeg : b.servoDeg;
 		
@@ -271,9 +263,6 @@ inline bool calculatePoseRate(
 }
 
 // 低速前进控制参数：左右位置和电机正方向需按实车确认。
-constexpr bool TOF1_IS_LEFT = false;
-constexpr bool MOTOR_A_IS_LEFT = false;
-constexpr int LEFT_MOTOR_DIRECTION = -1, RIGHT_MOTOR_DIRECTION = +1;
 constexpr uint32_t CONTROL_PERIOD_US = 60000UL;
 constexpr uint32_t MAX_CONTROL_GAP_US = 200000UL;
 constexpr float STOP_DISTANCE = 0.30f; // 需按实测制动距离调整
@@ -287,7 +276,6 @@ constexpr float MAX_TARGET_SPEED = 0.50f;
 constexpr float REVERSE_SPEED_LIMIT = 0.10f; // 任一轮低于 -0.10 m/s 才判反向异常
 constexpr float ESTIMATION_FALLBACK_SPEED_LIMIT = 0.20f; // 估计失败时允许简化纠偏的速度上限
 constexpr float ACCELERATION = 0.15f; // m/s²
-constexpr float MAX_STEER = 0.34f; // 弧度，约 19.5 度，留在当前 ±20 度标定范围内
 constexpr float MAX_STEER_RATE = 30.0f * PI / 180.0f; // 前轮转角最大变化率：30 度/秒
 
 // 启发式优化：如果持续接近道路中心，则减弱转向幅度

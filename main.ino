@@ -13,7 +13,7 @@
 #include "runtime_debug.h"
 
 // true：传感器、电机、编码器联合测试，不执行其它逻辑
-constexpr bool hardware_test_mode = false;
+constexpr bool hardware_test_mode = true;
 constexpr float target_speed = 0.24f; // 目标速度
 
 void setup() {

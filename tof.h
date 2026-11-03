@@ -58,7 +58,7 @@ void setup_late() {
 
 	if (!devices::tof1.init()) {
 		Serial.println("Sensor 1 initialization failed!");
-		while (true) { }
+		// while (true) { }
 	}
 
 	devices::tof1.setAddress(0x30);
@@ -68,7 +68,7 @@ void setup_late() {
 
 	if (!devices::tof2.init()) {
 		Serial.println("Sensor 2 initialization failed!");
-		while (true) { }
+		// while (true) { }
 	}
 
 	devices::tof2.setAddress(0x31);
