@@ -8,12 +8,15 @@
 #include "control.h"
 #include "hardware_test.h"
 #include "runtime_debug.h"
+
 #if defined(CONFIG_IDF_TARGET_ESP32S3)
 #include "web_debug.h"
 #endif
 
 // true：传感器、电机联合测试，不执行其它逻辑
-constexpr bool hardware_test_mode = false;
+constexpr bool hardware_test_mode = true;
+// true：启用 Wi-Fi 调试网页。关闭时串口调试仍可用。
+constexpr bool enable_web_debug = true;
 // 前进 PWM 在 calibration.h 的 DEFAULT_PWM_A/B 中配置。
 
 static bool initializationFailed = false;
@@ -26,7 +29,8 @@ void setup() {
 
 	Serial.begin(115200);
 #if defined(CONFIG_IDF_TARGET_ESP32S3)
-	web_debug::begin();
+	if constexpr (enable_web_debug)
+		web_debug::begin();
 #endif
 
 	ultrasonic::setup_late();
@@ -36,7 +40,7 @@ void setup() {
 	motor::setup_late();
 
 	if (!initializationFailed) {
-		if (hardware_test_mode)
+		if constexpr (hardware_test_mode)
 			hardware_test::setup();
 		else if (!control::start()) {
 			Serial.println("Control start failed: check calibration and configuration.");
@@ -50,7 +54,8 @@ void setup() {
 		Serial.println(F("Initialization failed. Vehicle stopped."));
 	}
 #if defined(CONFIG_IDF_TARGET_ESP32S3)
-	web_debug::publish(initializationFailed, hardware_test_mode);
+	if constexpr (enable_web_debug)
+		web_debug::publish(initializationFailed, hardware_test_mode);
 #endif
 }
 
@@ -58,14 +63,15 @@ void loop() {
 	if (initializationFailed)
 		return;
 
-	if (hardware_test_mode) {
+	if constexpr (hardware_test_mode) {
 		hardware_test::update();
 		return;
 	}
 
 	control::update();
 #if defined(CONFIG_IDF_TARGET_ESP32S3)
-	web_debug::publish(false, false);
+	if constexpr (enable_web_debug)
+		web_debug::publish(false, false);
 #endif
 	runtime_debug::update();
 	
