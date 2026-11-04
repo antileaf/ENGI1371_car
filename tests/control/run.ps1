@@ -7,7 +7,7 @@ Copy-Item (Join-Path $PSScriptRoot 'check.cpp') -Destination $checkDir
 # 只在临时副本中注入模拟标定，不修改实际车辆参数；11 不是实车确认值。
 $encoder = Get-Content (Join-Path $checkDir 'calibration.h') -Raw
 $control = Get-Content (Join-Path $checkDir 'calibration.h') -Raw
-$pattern = '(?s)(const SteeringCalibrationPoint steeringCalibration\[\] = )\{.*?\};'
+$pattern = '(?s)((?:constexpr|const) SteeringCalibrationPoint steeringCalibration\[\] = )\{.*?\};'
 $fixture = '$1{{-30.0f,60.0f},{-15.0f,75.0f},{0.0f,90.0f},{15.0f,105.0f},{30.0f,120.0f}};'
 [regex]::Replace($control, $pattern, $fixture) | Set-Content (Join-Path $checkDir 'calibration.h') -Encoding utf8
 $mockDir = Join-Path $PSScriptRoot 'mocks'

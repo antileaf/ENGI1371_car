@@ -13,8 +13,9 @@
 #include "runtime_debug.h"
 
 // true：传感器、电机、编码器联合测试，不执行其它逻辑
-constexpr bool hardware_test_mode = true;
+constexpr bool hardware_test_mode = false;
 constexpr float target_speed = 0.24f; // 目标速度
+static bool initializationFailed = false;
 
 void setup() {
 	ultrasonic::setup_early();
@@ -25,23 +26,36 @@ void setup() {
 
 	if (!encoder::setup()) {
 		Serial.println("Encoder interrupt setup failed!");
-		motor::stopMotors();
-		while (true) {}
+		initializationFailed = true;
 	}
 
 	ultrasonic::setup_late();
-	tof::setup_late();
+	if (!tof::setup_late())
+		initializationFailed = true;
 	servo::setup_late();
 	motor::setup_late();
 	encoder::resetSpeedWindow();
 
-	if (hardware_test_mode)
-		hardware_test::setup();
-	else if (!control::start(target_speed))
-		Serial.println("Control start failed: check calibration and configuration.");
+	if (!initializationFailed) {
+		if (hardware_test_mode)
+			hardware_test::setup();
+		else if (!control::start(target_speed)) {
+			Serial.println("Control start failed: check calibration and configuration.");
+			initializationFailed = true;
+		}
+	}
+
+	if (initializationFailed) {
+		motor::stopMotors();
+		servo::disable();
+		Serial.println(F("Initialization failed. Vehicle stopped."));
+	}
 }
 
 void loop() {
+	if (initializationFailed)
+		return;
+
 	if (hardware_test_mode) {
 		hardware_test::update();
 		return;

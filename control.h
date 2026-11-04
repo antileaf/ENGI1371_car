@@ -279,10 +279,11 @@ constexpr float ACCELERATION = 0.15f; // m/s²
 constexpr float MAX_STEER_RATE = 30.0f * PI / 180.0f; // 前轮转角最大变化率：30 度/秒
 
 // 启发式优化：如果持续接近道路中心，则减弱转向幅度
+// （暂时已关闭）
 constexpr float CENTRE_OFFSET_LIMIT = 0.03f; // 历史样本均在中心 ±3 cm 内
 constexpr float CENTRE_OFFSET_SPREAD = 0.004f; // 历史偏移极差不超过 4 mm
 constexpr float CENTRE_STABLE_SECONDS = 0.5f; // 至少观察 0.5 秒，避免仅凭单帧居中
-constexpr float CENTRED_CURVATURE_WEIGHT = 0.20f; // 居中稳定时保留 20% 曲率影响
+constexpr float CENTRED_CURVATURE_WEIGHT = 1.0f; // 居中稳定时
 constexpr float CURVATURE_FADE_SECONDS = 0.40f; // 平滑减弱时间常数
 constexpr float CURVATURE_RECOVER_SECONDS = 0.15f; // 离开稳定区域时更快恢复曲率影响
 
@@ -404,23 +405,27 @@ inline bool start(float targetSpeed) {
 	}
 
 	float centre, leftLimit, rightLimit;
+
 	if (!encoder::calibrationReady()) {
 		Serial.println(F("Control start: invalid encoder calibration."));
 		stop(Status::CalibrationMissing);
 		return false;
 	}
+
 	if (!steeringCalibrationReady()) {
 		Serial.println(F("Control start: invalid steering calibration table."));
 		stop(Status::CalibrationMissing);
 		return false;
 	}
+
 	if (!wheelAngleToServo(0, centre)) {
 		Serial.println(F("Control start: steering calibration does not cover centre."));
 		stop(Status::CalibrationMissing);
 		return false;
 	}
-	if (!wheelAngleToServo(MAX_STEER, leftLimit)
-		|| !wheelAngleToServo(-MAX_STEER, rightLimit)) {
+
+	if (!wheelAngleToServo(MAX_STEER, leftLimit) || 
+			!wheelAngleToServo(-MAX_STEER, rightLimit)) {
 		Serial.println(F("Control start: MAX_STEER exceeds calibrated wheel angles."));
 		stop(Status::CalibrationMissing);
 		return false;
@@ -476,46 +481,63 @@ inline int speedPI(float target, float measured, float dt, float &integral) {
 inline void updateObstacleRecovery() {
 	const uint32_t now = static_cast<uint32_t>(micros());
 	const uint32_t gap = now - runtime::lastObstacleCheckUs;
-	if (gap < CONTROL_PERIOD_US) return;
+	
+	if (gap < CONTROL_PERIOD_US)
+		return;
+	
 	// 未持续观察到的时间不计入畅通等待时间。
 	if (gap > MAX_CONTROL_GAP_US) {
 		runtime::telemetry.status = Status::Obstacle;
 		runtime::clearSinceUs = 0;
 		runtime::trackingBlocked = false; // 未观测的间隔不计入连续受阻时间
 	}
+
 	float front;
 	// 无回波按畅通处理，NAN 仅表示没有实际距离读数。
 	const bool hasEcho = ultrasonic::readDistance(front, 12000UL);
-	if (!hasEcho) front = NAN;
+	if (!hasEcho)
+		front = NAN;
+
 	if (hasEcho && (!isfinite(front) || front <= 0)) {
-		stop(Status::SensorFault); return;
+		stop(Status::SensorFault);
+		return;
 	}
+
 	const uint32_t sampledAt = static_cast<uint32_t>(micros());
 	runtime::lastObstacleCheckUs = sampledAt;
 	runtime::telemetry.frontDistance = front;
+
 	if (sampledAt - now > MAX_CONTROL_GAP_US) {
-		stop(Status::TimingFault); return;
+		stop(Status::TimingFault);
+		return;
 	}
+
 	if (hasEcho && front <= RESUME_DISTANCE) {
 		runtime::telemetry.status = Status::Obstacle;
 		runtime::clearSinceUs = 0;
+
 		if (!runtime::trackingBlocked) {
 			runtime::trackingBlocked = true;
 			runtime::blockedSinceUs = sampledAt;
 		}
+
 		if (sampledAt - runtime::blockedSinceUs >= OBSTACLE_LOCK_US) {
 			stop(Status::ObstacleLocked);
 			servo::disable();
 		}
+
 		return;
 	}
+
 	// 远距离或无回波仍按畅通处理，连续受阻计时重新开始。
 	runtime::trackingBlocked = false;
+
 	if (runtime::telemetry.status == Status::Obstacle) {
 		runtime::telemetry.status = Status::WaitingToRestart;
 		runtime::clearSinceUs = sampledAt;
 		return;
 	}
+
 	if (sampledAt - runtime::clearSinceUs >= RESTART_WAIT_US) {
 		// 重新检查标定并清除历史、积分、测速窗口，再从零缓慢起步。
 		start(runtime::requestedSpeed);
@@ -524,16 +546,22 @@ inline void updateObstacleRecovery() {
 
 // 仅凭 ToF 历史判断稳定居中，不使用可能受干扰的轮速差。
 inline bool centredAndStable() {
-	if (runtime::sampleCount < K) return false;
+	if (runtime::sampleCount < K)
+		return false;
+	
 	const float span = (runtime::timestamps[K-1] - runtime::timestamps[0]) * 1e-6f;
-	if (span < CENTRE_STABLE_SECONDS) return false;
+	if (span < CENTRE_STABLE_SECONDS)
+		return false;
+	
 	float minimum = INFINITY, maximum = -INFINITY;
 	for (int i = 0; i < K; i++) {
 		const float offset = (dr[i] - dl[i]) * 0.5f;
-		if (!isfinite(offset) || fabsf(offset) > CENTRE_OFFSET_LIMIT) return false;
+		if (!isfinite(offset) || fabsf(offset) > CENTRE_OFFSET_LIMIT)
+			return false;
 		minimum = fminf(minimum, offset);
 		maximum = fmaxf(maximum, offset);
 	}
+	
 	return maximum - minimum <= CENTRE_OFFSET_SPREAD;
 }
 

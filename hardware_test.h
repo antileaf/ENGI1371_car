@@ -41,6 +41,7 @@ inline void setup() {
 	devices::tof2.setTimeout(25);
 
 	servo::write(SERVO_ANGLE);
+	Serial.println(F("Servo: send 0-180 degrees followed by CR or LF."));
 
 	initialCounts = previousCounts = encoder::readCounts();
 	encoder::resetSpeedWindow();
@@ -70,7 +71,35 @@ inline void printDistance(float value, bool valid) {
 
 // 不再使用长 delay/getchar，电机运行和停车期间都持续采样输出。
 // 测距接口自身仍有短暂阻塞，阶段切换时间会有相应误差。
+inline void readServoCommand() {
+	// 分帧接收十进制角度，遇到行尾才执行；错误行整行丢弃。
+	static int angle = 0;
+	static bool hasDigits = false, invalid = false;
+	while (Serial.available() > 0) {
+		const int c = Serial.read();
+		if (c == '\r' || c == '\n') {
+			if (invalid)
+				Serial.println(F("Invalid servo angle (expected 0-180)."));
+			else if (hasDigits) {
+				servo::write(angle);
+				Serial.print(F("servo_deg="));
+				Serial.println(angle);
+			}
+			angle = 0;
+			hasDigits = invalid = false;
+		}
+		else if (!invalid && c >= '0' && c <= '9') {
+			hasDigits = true;
+			angle = angle * 10 + (c - '0');
+			invalid = angle > 180;
+		}
+		else
+			invalid = true;
+	}
+}
+
 inline void update() {
+	readServoCommand();
 	advancePhase();
 	const uint32_t now = static_cast<uint32_t>(millis());
 	if (now - lastOutputMs < OUTPUT_PERIOD_MS) return;

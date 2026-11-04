@@ -42,7 +42,7 @@ void enableSensor(int pin) {
 	delay(10);
 }
 
-void setup_late() {
+bool setup_late() {
 	// 先关闭全部传感器
 	disableSensor(ports::XSHUT_1);
 	disableSensor(ports::XSHUT_2);
@@ -56,26 +56,34 @@ void setup_late() {
 	// 初始化传感器 1
 	enableSensor(ports::XSHUT_1);
 
-	if (!devices::tof1.init()) {
+	const bool firstReady = devices::tof1.init();
+	if (!firstReady) {
 		Serial.println("Sensor 1 initialization failed!");
-		// while (true) { }
+		// 隔离可能仍占用默认地址的设备，再检查第二个传感器。
+		disableSensor(ports::XSHUT_1);
 	}
-
-	devices::tof1.setAddress(0x30);
+	else
+		devices::tof1.setAddress(0x30);
 
 	// 初始化传感器 2
 	enableSensor(ports::XSHUT_2);
 
-	if (!devices::tof2.init()) {
+	const bool secondReady = devices::tof2.init();
+	if (!secondReady) {
 		Serial.println("Sensor 2 initialization failed!");
-		// while (true) { }
+		disableSensor(ports::XSHUT_2);
 	}
-
-	devices::tof2.setAddress(0x31);
+	else
+		devices::tof2.setAddress(0x31);
 
 	// 开始连续测距
+	if (!firstReady || !secondReady)
+		return false;
+	
 	devices::tof1.startContinuous(50);
 	devices::tof2.startContinuous(50);
+	
+	return true;
 }
 
 }

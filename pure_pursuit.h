@@ -16,7 +16,8 @@ struct SteeringResult {
 float calculateLookahead(float v, float kappa) { // 自适应决定 lookahead
 	const float base = 0.30f;
 	const float T = 0.60f;
-	const float lambda = 1.50f;
+	const float lambda = 0.75f;
+	// lambda 越大，弯道的 lookahead 越小
 
 	float speedLookahead = base + T * fabsf(v);
 
