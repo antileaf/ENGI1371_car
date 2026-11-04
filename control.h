@@ -9,22 +9,15 @@
 
 namespace control {
 
-struct SteeringCalibrationPoint {
-	float wheelDeg; // 等效前轮转角，左转为正，单位：度
-	float servoDeg; // 传给 Servo::write() 的舵机指令角度，单位：度
-};
-
-// 标定时统一使用自行车模型的等效前轮转角，
-// 并非阿克曼转向机构的内外侧前轮实际转角。
-const SteeringCalibrationPoint steeringCalibration[] = {
-	{-20.0f, 120.0}, // 右转 20 度
-	{-10.0f, 100.0}, // 右转 10 度
-	{  0.0f, 75.0}, // 前轮归中
-	{ 10.0f, 50.0}, // 左转 10 度
-	{ 20.0f, 40.0}  // 左转 20 度
-};
-
-constexpr int STEERING_POINT_COUNT = sizeof(steeringCalibration) / sizeof(steeringCalibration[0]);
+using calibration::SteeringCalibrationPoint;
+using calibration::steeringCalibration;
+using calibration::STEERING_POINT_COUNT;
+using calibration::TOF1_IS_LEFT;
+using calibration::MOTOR_A_DIRECTION;
+using calibration::MOTOR_B_DIRECTION;
+using calibration::DEFAULT_PWM_A;
+using calibration::DEFAULT_PWM_B;
+using calibration::MAX_STEER;
 
 // PCHIP 保形三次插值经过所有实测点，连接处一阶导数连续。
 // 随着前轮向左转，舵机指令角度可以递增或递减，
@@ -106,8 +99,9 @@ inline float evaluate(int interval, float wheelDeg, const float slopes[]) {
 			+ t * (3 * change - 2 * startSlope - endSlope
 			+ t * (-2 * change + startSlope + endSlope)));
 	// 抑制浮点舍入引起的极小越界。
-	return fmaxf(fminf(a.servoDeg, b.servoDeg),
-				 fminf(value, fmaxf(a.servoDeg, b.servoDeg)));
+	const float lower = fminf(a.servoDeg, b.servoDeg);
+	const float upper = fmaxf(a.servoDeg, b.servoDeg);
+	return constrain(value, lower, upper);
 }
 } // namespace steeringDetail
 
@@ -160,7 +154,7 @@ inline bool interpolateSteering(float input, bool wheelToServo, float &output) {
 
 // 将 等效前轮转角 转换为舵机角度；调用 write() 时将 servoDeg 四舍五入。
 inline bool wheelAngleToServo(float phiRad, float &servoDeg) {
-	return interpolateSteering(phiRad * (180.0f / 3.14159265359f),
+	return interpolateSteering(phiRad * (180.0f / PI),
 			true, servoDeg);
 }
 
@@ -173,17 +167,11 @@ inline bool servoAngleToWheel(float servoDeg, float &phiRad) {
 		return false;
 	}
 
-	phiRad = wheelDeg * (3.14159265359f / 180.0f);
+	phiRad = wheelDeg * (PI / 180.0f);
 
 	return true;
 }
 
-// 低速前进控制参数：左右位置和电机正方向需按实车确认。
-constexpr bool TOF1_IS_LEFT = false;
-// 前进时各电机的输出符号；A 在右侧，B 在左侧。
-constexpr int MOTOR_A_DIRECTION = +1, MOTOR_B_DIRECTION = -1;
-static_assert((MOTOR_A_DIRECTION == 1 || MOTOR_A_DIRECTION == -1) &&
-	(MOTOR_B_DIRECTION == 1 || MOTOR_B_DIRECTION == -1), "Motor direction must be +1 or -1");
 constexpr uint32_t CONTROL_PERIOD_US = 60000UL;
 constexpr uint32_t MAX_CONTROL_GAP_US = 200000UL;
 constexpr float STOP_DISTANCE = 0.30f; // 需按实测制动距离调整
@@ -195,10 +183,9 @@ constexpr uint32_t RESTART_WAIT_US = 2000000UL; // 连续畅通 2 秒后重新�
 constexpr uint32_t OBSTACLE_LOCK_US = 60000000UL; // 连续受阻 60 秒后锁定停机
 
 // PWM 表示驱动力而非实测车速；两侧独立配置前进指令绝对值。
-constexpr int DEFAULT_PWM_A = 50, DEFAULT_PWM_B = 50, MAX_PWM = 150;
+constexpr int MAX_PWM = 150;
 constexpr float PWM_RAMP_PER_SECOND = 40.0f;
-constexpr float MAX_STEER = 0.34f;
-constexpr float MAX_STEER_RATE = 30.0f * 3.14159265359f / 180.0f;
+constexpr float MAX_STEER_RATE = 30.0f * PI / 180.0f;
 // 初始调试值：P 单位 rad/m，D 单位 rad/(m/s)，需实车低速调参。
 constexpr float OFFSET_KP = 2.5f, OFFSET_KD = 3.0f;
 constexpr float OFFSET_DEADBAND = 0.003f; // 仅 P 项使用死区，过中心时保留 D 项
@@ -224,7 +211,7 @@ struct Telemetry {
 	Status status = Status::Stopped;
 	float frontDistance = NAN, tofLeft = NAN, tofRight = NAN;
 	float rawOffset = 0, offset = 0, offsetRate = 0;
-	float pTerm = 0, dTerm = 0, desiredPhi = 0, appliedPhi = 0, servoDegrees = 75;
+	float pTerm = 0, dTerm = 0, desiredPhi = 0, appliedPhi = 0, servoDegrees = calibration::SERVO_CENTRE_DEG;
 	int pwmA = 0, pwmB = 0; // PWM 绝对值，停车为零；方向仅在电机输出时应用
 };
 
@@ -383,7 +370,7 @@ inline void observeOffset(float offset, uint32_t sampledAt, float dt) {
 
 	const float denominator = sampleCount * sumTT - sumT * sumT;
 	const float slope = denominator > 1e-9f ? (sampleCount * sumTX - sumT * sumX) / denominator : 0;
-	const float bounded = fmaxf(-MAX_OFFSET_RATE, fminf(MAX_OFFSET_RATE, slope));
+	const float bounded = constrain(slope, -MAX_OFFSET_RATE, MAX_OFFSET_RATE);
 	telemetry.offsetRate += dt / (RATE_FILTER_SECONDS + dt) * (bounded - telemetry.offsetRate);
 }
 
@@ -395,7 +382,8 @@ inline float steeringDemand(float offset, float rate) {
 	runtime::telemetry.pTerm = -OFFSET_KP * error;
 	runtime::telemetry.dTerm = -OFFSET_KD * rate;
 
-	return fmaxf(-MAX_STEER, fminf(MAX_STEER, runtime::telemetry.pTerm + runtime::telemetry.dTerm));
+	const float desiredPhi = runtime::telemetry.pTerm + runtime::telemetry.dTerm;
+	return constrain(desiredPhi, -MAX_STEER, MAX_STEER);
 }
 
 inline void update() {
@@ -465,7 +453,8 @@ inline void update() {
 	telemetry.desiredPhi = steeringDemand(telemetry.offset, telemetry.offsetRate);
 
 	const float step = MAX_STEER_RATE * dt;
-	const float phi = telemetry.appliedPhi + fmaxf(-step, fminf(step, telemetry.desiredPhi - telemetry.appliedPhi));
+	const float requestedChange = telemetry.desiredPhi - telemetry.appliedPhi;
+	const float phi = telemetry.appliedPhi + constrain(requestedChange, -step, step);
 	
 	float degrees;
 	if (!wheelAngleToServo(phi, degrees)) {

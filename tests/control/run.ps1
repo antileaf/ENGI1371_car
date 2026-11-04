@@ -4,8 +4,8 @@ $checkDir = Join-Path $env:TEMP ('car-control-' + [guid]::NewGuid().ToString('N'
 New-Item -ItemType Directory -Path $checkDir | Out-Null
 Copy-Item (Join-Path $projectDir '*.h') -Destination $checkDir
 Copy-Item (Join-Path $PSScriptRoot 'check.cpp') -Destination $checkDir
-$control = Get-Content (Join-Path $checkDir 'control.h') -Raw
-$pattern = '(?s)(const SteeringCalibrationPoint steeringCalibration\[\] = )\{.*?\};'
+$calibration = Get-Content (Join-Path $checkDir 'calibration.h') -Raw
+$pattern = '(?s)(constexpr SteeringCalibrationPoint steeringCalibration\[\] = )\{.*?\};'
 $mockDir = Join-Path $PSScriptRoot 'mocks'
 & g++ -std=c++11 -Wall -Wextra -pedantic -I $mockDir (Join-Path $checkDir 'check.cpp') -o (Join-Path $checkDir 'check.exe')
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -20,7 +20,7 @@ $tables = @(
  '$1{{-30.0f,150.0f},{-20.0f,148.0f},{0.0f,100.0f},{10.0f,90.0f},{30.0f,40.0f}};'
 )
 for ($index = 0; $index -lt $tables.Count; ++$index) {
-    [regex]::Replace($control, $pattern, $tables[$index]) | Set-Content (Join-Path $checkDir 'control.h') -Encoding utf8
+    [regex]::Replace($calibration, $pattern, $tables[$index]) | Set-Content (Join-Path $checkDir 'calibration.h') -Encoding utf8
     $flags = @('-std=c++11', '-Wall', '-Wextra', '-pedantic', '-I', $mockDir)
     if ($index -eq 0) { $flags += '-DKNOWN_MIDPOINT' }
     & g++ @flags (Join-Path $checkDir 'pchip.cpp') -o (Join-Path $checkDir 'pchip.exe')

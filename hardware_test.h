@@ -8,14 +8,14 @@
 namespace hardware_test {
 
 constexpr int TEST_PWM = 50; // 沿用原电机测试的 PWM
-constexpr int SERVO_ANGLE = 75; // 保留当前舵机测试角度，可在此调整
+constexpr int SERVO_ANGLE = static_cast<int>(calibration::SERVO_CENTRE_DEG + 0.5f);
 constexpr uint32_t OUTPUT_PERIOD_MS = 250;
 static uint32_t lastOutputMs = 0;
 static int pwmA = 0, pwmB = 0;
 
 inline void applyOutputs() {
-	pwmA = TEST_PWM;
-	pwmB = -TEST_PWM;
+	pwmA = TEST_PWM * calibration::MOTOR_A_DIRECTION;
+	pwmB = TEST_PWM * calibration::MOTOR_B_DIRECTION;
 
 	motor::motorA(pwmA);
 	motor::motorB(pwmB);
@@ -32,7 +32,7 @@ inline void setup() {
 	devices::tof2.setTimeout(25);
 
 	servo::write(SERVO_ANGLE);
-
+	Serial.println(F("Servo: send 0-180 degrees followed by CR or LF."));
 
 	lastOutputMs = static_cast<uint32_t>(millis());
 
@@ -46,8 +46,36 @@ inline void printDistance(float value, bool valid) {
 	else Serial.print(F("TIMEOUT"));
 }
 
+inline void readServoCommand() {
+	// 分帧接收十进制角度，遇到行尾才执行；错误行整行丢弃。
+	static int angle = 0;
+	static bool hasDigits = false, invalid = false;
+	while (Serial.available() > 0) {
+		const int c = Serial.read();
+		if (c == '\r' || c == '\n') {
+			if (invalid)
+				Serial.println(F("Invalid servo angle (expected 0-180)."));
+			else if (hasDigits) {
+				servo::write(angle);
+				Serial.print(F("servo_deg="));
+				Serial.println(angle);
+			}
+			angle = 0;
+			hasDigits = invalid = false;
+		}
+		else if (!invalid && c >= '0' && c <= '9') {
+			hasDigits = true;
+			angle = angle * 10 + (c - '0');
+			invalid = angle > 180;
+		}
+		else
+			invalid = true;
+	}
+}
+
 // 连续固定 PWM 前进测试，测距仍有短暂阻塞；此模式不执行避障。
 inline void update() {
+	readServoCommand();
 	const uint32_t now = static_cast<uint32_t>(millis());
 	if (now - lastOutputMs < OUTPUT_PERIOD_MS) return;
 	lastOutputMs = now;

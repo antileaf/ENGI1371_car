@@ -24,6 +24,9 @@ unsigned long pulseIn(int,int,unsigned long){return echoUs;}
 #include <sstream>
 #define F(text) text
 struct SerialMock {
+ std::string input;
+ int available(){return static_cast<int>(input.size());}
+ int read(){if(input.empty()) return -1; int c=input.front(); input.erase(0,1); return c;}
  std::ostringstream output;
  void begin(int){}
  template<class T> void print(T value){output<<value;}
@@ -31,3 +34,6 @@ struct SerialMock {
  template<class T> void println(T value){print(value);println();}
  void println(){output<<'\n';}
 } Serial;
+
+#define PI 3.1415926535897932384626433832795
+#define HALF_PI 1.5707963267948966192313216916398

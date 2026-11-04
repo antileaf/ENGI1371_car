@@ -14,7 +14,7 @@ void setup_late() {
 	servo.attach(ports::SERVO);
 
 	// 初始化到中间位置
-	servo.write(75);
+	servo.write(static_cast<int>(calibration::SERVO_CENTRE_DEG + 0.5f));
 }
 
 void write(int angle) {

@@ -11,7 +11,9 @@
 
 // true：传感器、电机联合测试，不执行其它逻辑
 constexpr bool hardware_test_mode = false;
-// 前进 PWM 在 control.h 的 DEFAULT_PWM_A/B 中配置。
+// 前进 PWM 在 calibration.h 的 DEFAULT_PWM_A/B 中配置。
+
+static bool initializationFailed = false;
 
 void setup() {
 	ultrasonic::setup_early();
@@ -21,17 +23,31 @@ void setup() {
 	Serial.begin(115200);
 
 	ultrasonic::setup_late();
-	tof::setup_late();
+	if (!tof::setup_late())
+		initializationFailed = true;
 	servo::setup_late();
 	motor::setup_late();
 
-	if (hardware_test_mode)
-		hardware_test::setup();
-	else if (!control::start())
-		Serial.println("Control start failed: check calibration and configuration.");
+	if (!initializationFailed) {
+		if (hardware_test_mode)
+			hardware_test::setup();
+		else if (!control::start()) {
+			Serial.println("Control start failed: check calibration and configuration.");
+			initializationFailed = true;
+		}
+	}
+
+	if (initializationFailed) {
+		motor::stopMotors();
+		servo::disable();
+		Serial.println(F("Initialization failed. Vehicle stopped."));
+	}
 }
 
 void loop() {
+	if (initializationFailed)
+		return;
+
 	if (hardware_test_mode) {
 		hardware_test::update();
 		return;
