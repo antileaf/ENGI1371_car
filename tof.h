@@ -50,8 +50,12 @@ inline void setup_early() {
 bool setup_late() {
 	delay(10);
 
-	// Wire 自动使用板载 SDA/SCL；两颗传感器通过独立 XSHUT 依次分配地址。
+	// 两颗传感器共用总线，通过独立 XSHUT 依次分配地址。
+#if defined(ARDUINO_ARCH_ESP32)
+	i2c.init(ports::TOF_SCL, ports::TOF_SDA);
+#else
 	Wire.begin();
+#endif
 
 	devices::tof1.setTimeout(500);
 	devices::tof2.setTimeout(500);

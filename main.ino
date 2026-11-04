@@ -8,6 +8,9 @@
 #include "control.h"
 #include "hardware_test.h"
 #include "runtime_debug.h"
+#if defined(CONFIG_IDF_TARGET_ESP32S3)
+#include "web_debug.h"
+#endif
 
 // true：传感器、电机联合测试，不执行其它逻辑
 constexpr bool hardware_test_mode = false;
@@ -22,6 +25,9 @@ void setup() {
 	motor::setup_early();
 
 	Serial.begin(115200);
+#if defined(CONFIG_IDF_TARGET_ESP32S3)
+	web_debug::begin();
+#endif
 
 	ultrasonic::setup_late();
 	if (!tof::setup_late())
@@ -43,6 +49,9 @@ void setup() {
 		servo::disable();
 		Serial.println(F("Initialization failed. Vehicle stopped."));
 	}
+#if defined(CONFIG_IDF_TARGET_ESP32S3)
+	web_debug::publish(initializationFailed, hardware_test_mode);
+#endif
 }
 
 void loop() {
@@ -55,6 +64,9 @@ void loop() {
 	}
 
 	control::update();
+#if defined(CONFIG_IDF_TARGET_ESP32S3)
+	web_debug::publish(false, false);
+#endif
 	runtime_debug::update();
 	
 	// 状态变化立即报告，详细调试数据每 1000 ms 输出一次。

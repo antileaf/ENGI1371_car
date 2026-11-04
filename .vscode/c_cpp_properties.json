@@ -1,61 +1,55 @@
 {
-    "configurations": [
-        {
-            "name": "arduino:avr:nano",
-            "includePath": [
-                "${workspaceFolder}/**",
-                "C:\\Users\\antil\\AppData\\Local\\Arduino15\\packages\\arduino\\hardware\\avr\\1.8.8\\cores\\arduino",
-                "C:\\Users\\antil\\AppData\\Local\\Arduino15\\packages\\arduino\\hardware\\avr\\1.8.8\\variants\\eightanaloginputs",
-                "C:\\Users\\antil\\AppData\\Local\\Arduino15\\packages\\arduino\\hardware\\avr\\1.8.8\\libraries\\Wire\\src",
-                "c:\\Users\\antil\\Documents\\Arduino\\libraries\\Servo\\src",
-                "c:\\Users\\antil\\Documents\\Arduino\\libraries\\VL53L0X",
-                "C:\\Users\\antil\\AppData\\Local\\Arduino15\\packages\\arduino\\tools\\avr-gcc\\7.3.0-atmel3.6.1-arduino7\\avr\\include"
-            ],
-            "forcedInclude": [
-                "C:\\Users\\antil\\AppData\\Local\\Arduino15\\packages\\arduino\\hardware\\avr\\1.8.8\\cores\\arduino\\Arduino.h"
-            ],
-            "defines": [
-                "F_CPU=16000000L",
-                "ARDUINO=10607",
-                "ARDUINO_AVR_NANO",
-                "ARDUINO_ARCH_AVR",
-                "UBRR0_0",
-                "UBRR0_1",
-                "UBRR0_2",
-                "UBRR0_3",
-                "UBRR0_4",
-                "UBRR0_5",
-                "UBRR0_6",
-                "UBRR0_7",
-                "UBRR0_8",
-                "UBRR0_9",
-                "SPIE",
-                "SPIF",
-                "USART_TX_vect_num",
-                "USART_TX_vect",
-                "SPI_STC_vect_num",
-                "USART_RX_vect",
-                "SPI2X",
-                "SPI_STC_vect",
-                "USBS0",
-                "TWIE",
-                "TWI_vect_num",
-                "USART_UDRE_vect_num",
-                "TWI_vect",
-                "UBRR0",
-                "USART_UDRE_vect",
-                "USART_RX_vect_num",
-                "TWINT",
-                "UBRR0H",
-                "UBRR0L",
-                "UBRR0_10",
-                "UBRR0_11"
-            ],
-            "compilerPath": "C:\\Users\\antil\\AppData\\Local\\Arduino15\\packages\\arduino\\tools\\avr-gcc\\7.3.0-atmel3.6.1-arduino7/bin/avr-g++",
-            "cStandard": "c11",
-            "cppStandard": "c++17",
-            "intelliSenseMode": "gcc-x64"
-        }
-    ],
-    "version": 4
+  "env": {
+    "espPackage": "${env:LOCALAPPDATA}/Arduino15/packages/esp32",
+    "arduinoCore": "${espPackage}/hardware/esp32/3.3.12",
+    "s3Sdk": "${espPackage}/tools/esp32s3-libs/3.3.12"
+  },
+  "configurations": [
+    {
+      "name": "ESP32-S3 N16R8 (Arduino)",
+      "compilerPath": "${espPackage}/tools/esp-x32/2601/bin/xtensa-esp32s3-elf-g++.exe",
+      "compilerArgs": [
+        "-mlongcalls",
+        "-iprefix",
+        "${s3Sdk}/include/",
+        "@${s3Sdk}/flags/includes",
+        "@${s3Sdk}/flags/defines"
+      ],
+      "includePath": [
+        "${workspaceFolder}",
+        "${s3Sdk}/qio_opi/include",
+        "${arduinoCore}/cores/esp32",
+        "${arduinoCore}/variants/esp32s3",
+        "${arduinoCore}/libraries/WiFi/src",
+        "${arduinoCore}/libraries/Network/src",
+        "${env:USERPROFILE}/Documents/Arduino/libraries/ESP32Servo/src"
+      ],
+      "forcedInclude": [
+        "${arduinoCore}/cores/esp32/Arduino.h"
+      ],
+      "defines": [
+        "F_CPU=240000000L",
+        "ARDUINO=10607",
+        "ARDUINO_ESP32S3_DEV",
+        "ARDUINO_ARCH_ESP32",
+        "ARDUINO_BOARD=\"ESP32S3_DEV\"",
+        "ARDUINO_VARIANT=\"esp32s3\"",
+        "ARDUINO_PARTITION_default",
+        "ARDUINO_HOST_OS=\"windows\"",
+        "ARDUINO_FQBN=\"esp32:esp32:esp32s3:FlashSize=16M,PSRAM=opi\"",
+        "ESP32=ESP32",
+        "CORE_DEBUG_LEVEL=0",
+        "ARDUINO_RUNNING_CORE=1",
+        "ARDUINO_EVENT_RUNNING_CORE=1",
+        "BOARD_HAS_PSRAM",
+        "ARDUINO_USB_MODE=1",
+        "ARDUINO_USB_CDC_ON_BOOT=0",
+        "ARDUINO_USB_MSC_ON_BOOT=0",
+        "ARDUINO_USB_DFU_ON_BOOT=0"
+      ],
+      "cStandard": "gnu17",
+      "cppStandard": "gnu++20"
+    }
+  ],
+  "version": 4
 }
