@@ -4,37 +4,31 @@
 
 namespace motor {
 
-void setMotor(int pwm, int in1, int in2, int speed) {
+void setMotor(int enablePin, int in1, int in2, int speed) {
 	speed = constrain(speed, -255, 255);
 
-	// if (brake) {
-	//     digitalWrite(in1, HIGH);
-	//     digitalWrite(in2, HIGH);
-	//     // digitalWrite(pwm, LOW); // 任意
-	//     return;
-	// }
-
 	if (speed == 0) {
+		// 关闭对应桥臂，让车轮惯性滑停。
+		digitalWrite(enablePin, LOW);
 		digitalWrite(in1, LOW);
 		digitalWrite(in2, LOW);
-		digitalWrite(pwm, HIGH);
 		return;
 	}
 
-	analogWrite(pwm, 0);
+	analogWrite(enablePin, 0);
 
 	digitalWrite(in1, speed > 0);
 	digitalWrite(in2, speed < 0);
 
-	analogWrite(pwm, abs(speed));
+	analogWrite(enablePin, abs(speed));
 }
 
 void motorA(int speed) {
-	setMotor(ports::PWMA, ports::AIN_1, ports::AIN_2, speed);
+	setMotor(ports::ENA, ports::IN_1, ports::IN_2, speed);
 }
 
 void motorB(int speed) {
-	setMotor(ports::PWMB, ports::BIN_1, ports::BIN_2, speed);
+	setMotor(ports::ENB, ports::IN_3, ports::IN_4, speed);
 }
 
 void stopMotors() {
@@ -42,50 +36,25 @@ void stopMotors() {
 	motorB(0);
 }
 
-void brakeMotors() { // TODO
-	motorA(0);
-	motorB(0);
+void brakeMotors() {
+	// 两个方向脚已由 stopMotors() 拉低，再使能以执行电气制动。
+	stopMotors();
+	digitalWrite(ports::ENA, HIGH);
+	digitalWrite(ports::ENB, HIGH);
 }
 
 void setup_early() {
-	pinMode(ports::AIN_1, OUTPUT);
-	pinMode(ports::BIN_1, OUTPUT);
-	pinMode(ports::AIN_2, OUTPUT);
-	pinMode(ports::BIN_2, OUTPUT);
+	pinMode(ports::IN_1, OUTPUT);
+	pinMode(ports::IN_3, OUTPUT);
+	pinMode(ports::IN_2, OUTPUT);
+	pinMode(ports::IN_4, OUTPUT);
 
-	pinMode(ports::STBY, OUTPUT);
-
-	pinMode(ports::XSHUT_1, OUTPUT);
-	// pinMode(SDA_1, INPUT);
-	// pinMode(SCL_1, OUTPUT);
-
-	pinMode(ports::XSHUT_2, OUTPUT);
-	// pinMode(SDA_2, INPUT);
-	// pinMode(SCL_2, OUTPUT);
-
-	pinMode(ports::PWMA, OUTPUT);
-	pinMode(ports::PWMB, OUTPUT);
+	pinMode(ports::ENA, OUTPUT);
+	pinMode(ports::ENB, OUTPUT);
 }
 
 void setup_late() {
-	// 先让驱动板进入待机
-	pinMode(ports::STBY, OUTPUT);
-	digitalWrite(ports::STBY, LOW);
-
-	pinMode(ports::PWMA, OUTPUT);
-	pinMode(ports::PWMB, OUTPUT);
-
-	pinMode(ports::AIN_1, OUTPUT);
-	pinMode(ports::AIN_2, OUTPUT);
-	pinMode(ports::BIN_1, OUTPUT);
-	pinMode(ports::BIN_2, OUTPUT);
-
 	stopMotors();
-
-	delay(500);
-
-	// 启用驱动板
-	digitalWrite(ports::STBY, HIGH);
 }
 
 } // namespace motor

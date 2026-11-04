@@ -16,6 +16,7 @@ constexpr bool hardware_test_mode = false;
 static bool initializationFailed = false;
 
 void setup() {
+	tof::setup_early();
 	ultrasonic::setup_early();
 	servo::setup_early();
 	motor::setup_early();

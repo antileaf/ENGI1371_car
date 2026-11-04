@@ -23,7 +23,7 @@ int main() {
 	for(int i=0;i<40;++i) tick();
 	assert(getTelemetry().status==Status::Running);
 	assert(getTelemetry().pwmA==50 && getTelemetry().pwmB==60);
-	assert(levels[ports::AIN_1]==HIGH && levels[ports::BIN_2]==HIGH);
+	assert(levels[ports::IN_1]==HIGH && levels[ports::IN_4]==HIGH);
 	assert(fabsf(getTelemetry().appliedPhi)<1e-6f);
 	// 中心点仍有横移时必须纠偏；返回中心时 D 项与 P 项相反。
 	assert(steeringDemand(0,.03f)<0);

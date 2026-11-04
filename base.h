@@ -8,23 +8,22 @@
 
 namespace ports {
 // 舵机
-constexpr int SERVO = 9;
+constexpr int SERVO = 12; // D12
 
 // 超声波传感器
-constexpr int ULTRASONIC_TRIG = 10; // output
-constexpr int ULTRASONIC_ECHO = 11; // input
+constexpr int ULTRASONIC_TRIG = A0; // output
+constexpr int ULTRASONIC_ECHO = 13; // input
 
 // ToF 传感器
-constexpr int XSHUT_1 = A2; // output
-constexpr int SDA_1 = SDA, SCL_1 = SCL;
-constexpr int XSHUT_2 = A3; // output
-constexpr int SDA_2 = A4, SCL_2 = A5;
+constexpr int XSHUT_1 = 10; // output
+constexpr int XSHUT_2 = 11; // output
+// 两颗 ToF 共用 Wire 的硬件 I²C 总线，经典 Nano 上为 A4/A5。
+constexpr int TOF_SDA = SDA, TOF_SCL = SCL;
 
-// 驱动板
-constexpr int PWMA = 5, PWMB = 6; // analog output
-constexpr int AIN_1 = 4, AIN_2 = 7; // output
-constexpr int BIN_1 = 8, BIN_2 = 12; // output
-constexpr int STBY = 13; // output
+// L298N 电机驱动板
+constexpr int ENA = 5, ENB = 3; // A/B 通道使能
+constexpr int IN_1 = 8, IN_2 = 7; // output
+constexpr int IN_3 = 6, IN_4 = 4; // output
 }
 
 namespace devices {

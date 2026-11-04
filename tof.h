@@ -42,12 +42,15 @@ void enableSensor(int pin) {
 	delay(10);
 }
 
-bool setup_late() {
-	// 先关闭全部传感器
+inline void setup_early() {
 	disableSensor(ports::XSHUT_1);
 	disableSensor(ports::XSHUT_2);
+}
+
+bool setup_late() {
 	delay(10);
 
+	// Wire 自动使用板载 SDA/SCL；两颗传感器通过独立 XSHUT 依次分配地址。
 	Wire.begin();
 
 	devices::tof1.setTimeout(500);
