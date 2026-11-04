@@ -1,7 +1,7 @@
 #pragma once
 
 const float MIN_LOOKAHEAD = 0.15f;
-const float MAX_LOOKAHEAD = 1.00f;
+const float MAX_LOOKAHEAD = 0.50f;
 
 const float PREDICTION_TIME = 0.5f;
 

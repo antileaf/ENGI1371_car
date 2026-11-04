@@ -102,26 +102,6 @@ int main(){
  times[2]=times[1];assert(!state::estimateTimedState(left,right,sl,sr,times,s));
  float integral=0;for(int i=0;i<100;i++)control::speedPI(1,0,.06f,integral);
  assert(integral==0);assert(control::speedPI(0,.1f,.06f,integral)==0);
- // 持续稳定居中才减弱曲率；离开中心或横向抖动时平滑恢复。
- control::runtime::sampleCount = K;
- for(int i=0;i<K;i++){
-  dl[i]=dr[i]=.3f;
-  control::runtime::timestamps[i]=static_cast<uint32_t>(UINT32_MAX-300000)+i*60000UL;
- }
- assert(control::centredAndStable());
- control::runtime::curvatureWeight=1;
- for(int i=0;i<50;i++)control::updateCurvatureWeight(.06f);
- assert(control::runtime::curvatureWeight<.21f && control::runtime::curvatureWeight>=.2f);
- dr[K-1]=.33f;
- assert(!control::centredAndStable());
- float oldWeight=control::runtime::curvatureWeight;
- float recovered=control::updateCurvatureWeight(.06f);
- assert(recovered>oldWeight && recovered<1);
- dr[K-1]=.312f; // 偏移虽小于 1 cm，但历史变化超过 4 mm。
- assert(!control::centredAndStable());
- dr[K-1]=.3f;
- control::runtime::sampleCount=1;
- assert(!control::centredAndStable());
  // 不同采样间隔下均遵守角速度上限，左右反转也不能跳变。
  control::runtime::appliedPhi=0;
  float limited=control::limitSteeringRate(control::MAX_STEER,.06f);
@@ -135,7 +115,7 @@ int main(){
  float ratio=(steeringData.targetRight-steeringData.targetLeft)
               /(steeringData.targetRight+steeringData.targetLeft);
  assert(fabsf(ratio-tanf(steeringData.appliedPhi)*W/(2*L))<1e-5f);
- restart();assert(control::runtime::appliedPhi==0 && control::runtime::curvatureWeight==1);
+ restart();assert(control::runtime::appliedPhi==0);
  // 连续受阻满一分钟锁定，覆盖 micros() 回绕及恢复后的舵机状态。
  nowUs=UINT32_MAX-20000000UL;
  restart();detectObstacle();

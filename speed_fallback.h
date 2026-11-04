@@ -1,6 +1,7 @@
 #pragma once
 
 #include <math.h>
+#include <Arduino.h>
 
 namespace speed_fallback {
 
@@ -63,7 +64,8 @@ struct Wheel {
 	int openLoopPwm(float target, int maxPwm) const {
 		if (target <= 0 || !isfinite(fallbackGain) || fallbackGain <= 0)
 			return 0;
-		return static_cast<int>(lroundf(fmaxf(0, fminf(maxPwm, target / fallbackGain))));
+		const float pwm = target / fallbackGain;
+		return static_cast<int>(lroundf(constrain(pwm, 0, maxPwm)));
 	}
 };
 

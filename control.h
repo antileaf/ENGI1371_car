@@ -105,8 +105,9 @@ inline float evaluate(int interval, float wheelDeg, const float slopes[]) {
 			+ t * (3 * change - 2 * startSlope - endSlope
 			+ t * (-2 * change + startSlope + endSlope)));
 	// 抑制浮点舍入引起的极小越界。
-	return fmaxf(fminf(a.servoDeg, b.servoDeg),
-				 fminf(value, fmaxf(a.servoDeg, b.servoDeg)));
+	const float lower = fminf(a.servoDeg, b.servoDeg);
+	const float upper = fmaxf(a.servoDeg, b.servoDeg);
+	return constrain(value, lower, upper);
 }
 } // namespace steeringDetail
 
@@ -217,7 +218,7 @@ inline bool calculateBicycleModel(
 	}
 
 	BicycleResult next;
-	next.phi = fmaxf(-maxSteer, fminf(phi, maxSteer));
+	next.phi = constrain(phi, -maxSteer, maxSteer);
 	next.curvature = tanf(next.phi) / wheelbase;
 	next.alpha = v * next.curvature;
 
@@ -278,15 +279,6 @@ constexpr float ESTIMATION_FALLBACK_SPEED_LIMIT = 0.20f; // 估计失败时允�
 constexpr float ACCELERATION = 0.15f; // m/s²
 constexpr float MAX_STEER_RATE = 30.0f * PI / 180.0f; // 前轮转角最大变化率：30 度/秒
 
-// 启发式优化：如果持续接近道路中心，则减弱转向幅度
-// （暂时已关闭）
-constexpr float CENTRE_OFFSET_LIMIT = 0.03f; // 历史样本均在中心 ±3 cm 内
-constexpr float CENTRE_OFFSET_SPREAD = 0.004f; // 历史偏移极差不超过 4 mm
-constexpr float CENTRE_STABLE_SECONDS = 0.5f; // 至少观察 0.5 秒，避免仅凭单帧居中
-constexpr float CENTRED_CURVATURE_WEIGHT = 1.0f; // 居中稳定时
-constexpr float CURVATURE_FADE_SECONDS = 0.40f; // 平滑减弱时间常数
-constexpr float CURVATURE_RECOVER_SECONDS = 0.15f; // 离开稳定区域时更快恢复曲率影响
-
 // PI 增益为初始调试值，尚未按实际 5 V 电机标定；输出单位为 PWM。
 constexpr float SPEED_KP = 400.0f, SPEED_KI = 100.0f;
 constexpr int MAX_PWM = 150;
@@ -321,7 +313,6 @@ struct Telemetry { // 遥测
 	bool fallbackLeftMeasured = false, fallbackRightMeasured = false;
 	float targetLeft, targetRight;
 	float servoDegrees;
-	float curvatureWeight = 1.0f;
 	float appliedPhi = 0; // 限制变化率后的前轮目标转角，弧度，不是实测角度
 	int pwmLeft, pwmRight;
 };
@@ -338,7 +329,7 @@ static uint32_t blockedSinceUs = 0;
 static bool trackingBlocked = false;
 static float requestedSpeed = 0, rampedSpeed = 0, filteredKappa = 0;
 static float leftIntegral = 0, rightIntegral = 0, stallSeconds = 0;
-static float curvatureWeight = 1.0f, appliedPhi = 0;
+static float appliedPhi = 0;
 static speed_fallback::Wheel fallbackLeft, fallbackRight;
 static int encoderOnlySamples = 0;
 }
@@ -445,7 +436,6 @@ inline bool start(float targetSpeed) {
 
 	runtime::telemetry = Telemetry{};
 	runtime::telemetry.servoDegrees = centre;
-	runtime::curvatureWeight = 1.0f;
 	runtime::appliedPhi = 0;
 	runtime::telemetry.status = Status::WarmingUp;
 	runtime::sampleCount = 0;
@@ -471,8 +461,9 @@ inline int speedPI(float target, float measured, float dt, float &integral) {
 	if ((raw >= 0 && raw <= MAX_PWM) || (raw > MAX_PWM && error < 0) || (raw < 0 && error > 0))
 		integral = proposed;
 
-	integral = fmaxf(-MAX_PWM, fminf(integral, MAX_PWM));
-	return static_cast<int>(lroundf(fmaxf(0, fminf(MAX_PWM, SPEED_KP * error + integral))));
+	integral = constrain(integral, -MAX_PWM, MAX_PWM);
+	const float pwm = SPEED_KP * error + integral;
+	return static_cast<int>(lroundf(constrain(pwm, 0, MAX_PWM)));
 }
 
 // 每次 loop 调用即可，不要再插入 delay 或阻塞测试。
@@ -544,41 +535,13 @@ inline void updateObstacleRecovery() {
 	}
 }
 
-// 仅凭 ToF 历史判断稳定居中，不使用可能受干扰的轮速差。
-inline bool centredAndStable() {
-	if (runtime::sampleCount < K)
-		return false;
-	
-	const float span = (runtime::timestamps[K-1] - runtime::timestamps[0]) * 1e-6f;
-	if (span < CENTRE_STABLE_SECONDS)
-		return false;
-	
-	float minimum = INFINITY, maximum = -INFINITY;
-	for (int i = 0; i < K; i++) {
-		const float offset = (dr[i] - dl[i]) * 0.5f;
-		if (!isfinite(offset) || fabsf(offset) > CENTRE_OFFSET_LIMIT)
-			return false;
-		minimum = fminf(minimum, offset);
-		maximum = fmaxf(maximum, offset);
-	}
-	
-	return maximum - minimum <= CENTRE_OFFSET_SPREAD;
-}
-
-inline float updateCurvatureWeight(float dt) {
-	const bool stable = centredAndStable();
-	const float target = stable ? CENTRED_CURVATURE_WEIGHT : 1.0f;
-	const float tau = stable ? CURVATURE_FADE_SECONDS : CURVATURE_RECOVER_SECONDS;
-	runtime::curvatureWeight += dt / (tau + dt) * (target - runtime::curvatureWeight);
-	return runtime::curvatureWeight;
-}
-
 // 按实际经过时间限制前轮目标角变化；左右轮目标速度也必须使用该角度。
 inline float limitSteeringRate(float desiredPhi, float dt) {
 	const float maximumChange = MAX_STEER_RATE * dt;
-	const float change = fmaxf(-maximumChange,
-		fminf(desiredPhi - runtime::appliedPhi, maximumChange));
-	return fmaxf(-MAX_STEER, fminf(runtime::appliedPhi + change, MAX_STEER));
+	const float requestedChange = desiredPhi - runtime::appliedPhi;
+	const float change = constrain(requestedChange, -maximumChange, maximumChange);
+	const float nextPhi = runtime::appliedPhi + change;
+	return constrain(nextPhi, -MAX_STEER, MAX_STEER);
 }
 
 inline void update() {
@@ -646,8 +609,7 @@ inline void update() {
 	speedLeft = MOTOR_A_IS_LEFT ? speedMotorA : speedMotorB;
 	speedRight = MOTOR_A_IS_LEFT ? speedMotorB : speedMotorA;
 	
-	if (!validSpeeds ||
-			!isfinite(speedLeft) || !isfinite(speedRight)) {
+	if (!validSpeeds || !isfinite(speedLeft) || !isfinite(speedRight)) {
 		runtime::telemetry.measuredLeft = speedLeft;
 		runtime::telemetry.measuredRight = speedRight;
 		failDrive(DriveFaultCause::SpeedRead);
@@ -748,12 +710,10 @@ inline void update() {
 	runtime::telemetry.car = estimated;
 	runtime::telemetry.status = fullEstimate ? Status::Running : Status::LowSpeed;
 
-	const float curvatureWeight = updateCurvatureWeight(dt);
-	const float steeringKappa = runtime::filteredKappa * curvatureWeight;
 
-	const float lookahead = pure_pursuit::calculateLookahead(estimated.v, steeringKappa);
+	const float lookahead = pure_pursuit::calculateLookahead(estimated.v, runtime::filteredKappa);
 	const pure_pursuit::SteeringResult steering = pure_pursuit::calculateSteering(
-		estimated.x, estimated.theta, steeringKappa, L, lookahead, MAX_STEER);
+		estimated.x, estimated.theta, runtime::filteredKappa, L, lookahead, MAX_STEER);
 	
 	if (!isfinite(steering.phi) || !isfinite(steering.curvature)) {
 		stop(Status::EstimationFault);
@@ -808,7 +768,6 @@ inline void update() {
 
 	runtime::appliedPhi = command.phi;
 	runtime::telemetry.appliedPhi = command.phi;
-	runtime::telemetry.curvatureWeight = curvatureWeight;
 
 	const int leftOutput = pwmLeft * LEFT_MOTOR_DIRECTION;
 	const int rightOutput = pwmRight * RIGHT_MOTOR_DIRECTION;

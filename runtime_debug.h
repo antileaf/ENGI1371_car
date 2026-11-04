@@ -57,7 +57,6 @@ inline void update() {
 	Serial.print(F(" x_m=")); Serial.print(data.car.x, 3);
 	Serial.print(F(" theta_rad=")); Serial.print(data.car.theta, 3);
 	Serial.print(F(" kappa_1pm=")); Serial.print(data.car.kappa, 3);
-	Serial.print(F(" curve_weight=")); Serial.print(data.curvatureWeight, 2);
 	Serial.print(F(" steer_rad=")); Serial.print(data.appliedPhi, 3);
 	Serial.print(F(" servo_deg=")); Serial.print(data.servoDegrees, 1);
 	Serial.print(F(" pwmL=")); Serial.print(data.pwmLeft);
