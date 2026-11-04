@@ -5,5 +5,5 @@ struct Servo {
  void attach(int){enabled=true;}
  void detach(){enabled=false;}
  bool attached(){return enabled;}
- void write(int value){angle=value;++writes;}
+ void write(int value){if(enabled){angle=value;++writes;}}
 };

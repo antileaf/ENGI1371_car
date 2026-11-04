@@ -5,7 +5,7 @@
 
 _i2c i2c;
 
-void _i2c::init(int scl, int sda) {
+esp_err_t _i2c::init(int scl, int sda) {
     i2c_config_t conf = {};
     const int I2C_MASTER_SCL_IO = scl;       /*!< GPIO number used for I2C master clock */
     const int I2C_MASTER_SDA_IO = sda;       /*!< GPIO number used for I2C master data  */
@@ -19,38 +19,17 @@ void _i2c::init(int scl, int sda) {
     conf.scl_pullup_en = GPIO_PULLUP_ENABLE;
     conf.master.clk_speed = I2C_MASTER_FREQ_HZ;  // select frequency specific to your project
     conf.clk_flags = 0;
-    i2c_param_config(i2c_master_port, &conf);
-    i2c_driver_install(i2c_master_port, conf.mode, I2C_MASTER_RX_BUF_DISABLE, I2C_MASTER_TX_BUF_DISABLE, 0);
+    esp_err_t result = i2c_param_config(i2c_master_port, &conf);
+    if (result != ESP_OK) return result;
+    return i2c_driver_install(i2c_master_port, conf.mode, I2C_MASTER_RX_BUF_DISABLE, I2C_MASTER_TX_BUF_DISABLE, 0);
 }
 
-void _i2c::write(uint8_t addr, uint8_t* data, size_t size) {
-    i2c_cmd_handle_t cmd = i2c_cmd_link_create();
-    i2c_master_start(cmd);
-    i2c_master_write_byte(cmd, addr << 1 | I2C_MASTER_WRITE, I2C_MASTER_ACK);
-    i2c_master_write(cmd, data, size, 0);
-    i2c_master_stop(cmd);
-    i2c_master_cmd_begin(i2c_master_port, cmd, 1);
-    i2c_cmd_link_delete(cmd);
+esp_err_t _i2c::write(uint8_t addr, const uint8_t* data, size_t size) {
+    return i2c_master_write_to_device(i2c_master_port, addr, data, size, 1);
 }
 
-void _i2c::write(uint8_t addr, uint8_t data) {
-    i2c_cmd_handle_t cmd = i2c_cmd_link_create();
-    i2c_master_start(cmd);
-    i2c_master_write_byte(cmd, addr << 1 | I2C_MASTER_WRITE, I2C_MASTER_ACK);
-    i2c_master_write_byte(cmd, data, 0);
-    i2c_master_stop(cmd);
-    i2c_master_cmd_begin(i2c_master_port, cmd, 1);
-    i2c_cmd_link_delete(cmd);
+esp_err_t _i2c::readRegister(uint8_t addr, uint8_t reg, uint8_t* data, size_t size) {
+    // IDF uses a repeated START and NACKs the final byte.
+    return i2c_master_write_read_device(i2c_master_port, addr, &reg, 1, data, size, 1);
 }
-
-void _i2c::read(uint8_t addr, uint8_t* data, size_t size) {
-    i2c_cmd_handle_t cmd = i2c_cmd_link_create();
-    i2c_master_start(cmd);
-    i2c_master_write_byte(cmd, addr << 1 | I2C_MASTER_READ, I2C_MASTER_ACK);
-    i2c_master_read(cmd, data, size, I2C_MASTER_ACK);
-    i2c_master_stop(cmd);
-    i2c_master_cmd_begin(i2c_master_port, cmd, 1);
-    i2c_cmd_link_delete(cmd);
-}
-
 #endif

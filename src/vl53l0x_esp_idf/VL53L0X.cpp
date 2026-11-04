@@ -7,6 +7,7 @@
 
 #include "VL53L0X.h"
 #include <esp_timer.h>
+#include <string.h>
 #include "i2c.h"
 // #include <Wire.h>
 
@@ -47,8 +48,9 @@ VL53L0X::VL53L0X()
 // Public Methods //////////////////////////////////////////////////////////////
 
 void VL53L0X::setAddress(uint8_t new_addr) {
+    last_status = ESP_OK;
     writeReg(I2C_SLAVE_DEVICE_ADDRESS, new_addr & 0x7F);
-    address = new_addr;
+    if (last_status == ESP_OK) address = new_addr;
 }
 
 // Initialize sensor using sequence based on VL53L0X_DataInit(),
@@ -60,6 +62,7 @@ void VL53L0X::setAddress(uint8_t new_addr) {
 // If io_2v8 (optional) is true or not given, the sensor is configured for 2V8
 // mode.
 bool VL53L0X::init(bool io_2v8) {
+    last_status = ESP_OK;
     // check model ID register (value specified in datasheet)
     if (readReg(IDENTIFICATION_MODEL_ID) != 0xEE) {
         return false;
@@ -282,56 +285,47 @@ bool VL53L0X::init(bool io_2v8) {
 
     // VL53L0X_PerformRefCalibration() end
 
-    return true;
+    return last_status == ESP_OK;
 }
 
 // Write an 8-bit register
 void VL53L0X::writeReg(uint8_t reg, uint8_t value) {
     uint8_t data[2] = {reg, value};
-    i2c.write(address, data, 2);
-    last_status = 0;
+    if (last_status == ESP_OK) last_status = i2c.write(address, data, 2);
 }
 
 // Write a 16-bit register
 void VL53L0X::writeReg16Bit(uint8_t reg, uint16_t value) {
     uint8_t data[3] = {reg, (uint8_t)(value >> 8), (uint8_t)value};
-    i2c.write(address, data, 3);
-    last_status = 0;
+    if (last_status == ESP_OK) last_status = i2c.write(address, data, 3);
 }
 
 // Write a 32-bit register
 void VL53L0X::writeReg32Bit(uint8_t reg, uint32_t value) {
     uint8_t data[5] = {reg, (uint8_t)(value >> 24), (uint8_t)(value >> 16), (uint8_t)(value >> 8), (uint8_t)value};
-    i2c.write(address, data, 5);
-    last_status = 0;
+    if (last_status == ESP_OK) last_status = i2c.write(address, data, 5);
 }
 
 // Read an 8-bit register
 uint8_t VL53L0X::readReg(uint8_t reg) {
-    i2c.write(address, reg);
-    last_status = 0;
-    uint8_t value[1];
-    i2c.read(address, value, 1);
+    uint8_t value[1] = {};
+    readMulti(reg, value, 1);
 
     return value[0];
 }
 
 // Read a 16-bit register
 uint16_t VL53L0X::readReg16Bit(uint8_t reg) {
-    i2c.write(address, reg);
-    last_status = 0;
-    uint8_t value[2];
-    i2c.read(address, value, 2);
+    uint8_t value[2] = {};
+    readMulti(reg, value, 2);
     return (uint16_t)(value[0] << 8 | value[1]);
 }
 
 // Read a 32-bit register
 uint32_t VL53L0X::readReg32Bit(uint8_t reg) {
-    i2c.write(address, reg);
-    last_status = 0;
-    uint8_t value[4];
-    i2c.read(address, value, 4);
-    return (uint32_t)(value[0] << 24 | value[1] << 16 | value[2] << 8 | value[0]);
+    uint8_t value[4] = {};
+    readMulti(reg, value, 4);
+    return ((uint32_t)value[0] << 24) | (value[1] << 16) | (value[2] << 8) | value[3];
 }
 
 // Write an arbitrary number of bytes from the given array to the sensor,
@@ -342,15 +336,14 @@ void VL53L0X::writeMulti(uint8_t reg, uint8_t const* src, uint8_t count) {
     for (int i = 0; i < count; i++) {
         data[i + 1] = *(src + i);
     }
-    i2c.write(address, data, count + 1);
-    last_status = 0;
+    if (last_status == ESP_OK) last_status = i2c.write(address, data, count + 1);
 }
 
 // Read an arbitrary number of bytes from the sensor, starting at the given
 // register, into the given array
 void VL53L0X::readMulti(uint8_t reg, uint8_t* dst, uint8_t count) {
-    i2c.write(address, reg);
-    i2c.read(address, dst, count);
+    if (last_status == ESP_OK) last_status = i2c.readRegister(address, reg, dst, count);
+    if (last_status != ESP_OK) memset(dst, 0, count);
 }
 
 // Set the return signal rate limit check value in units of MCPS (mega counts
@@ -690,6 +683,7 @@ uint8_t VL53L0X::getVcselPulsePeriod(vcselPeriodType type) {
 // takes a measurement.
 // based on VL53L0X_StartMeasurement()
 void VL53L0X::startContinuous(uint32_t period_ms) {
+    last_status = ESP_OK;
     writeReg(0x80, 0x01);
     writeReg(0xFF, 0x01);
     writeReg(0x00, 0x00);
@@ -736,9 +730,10 @@ void VL53L0X::stopContinuous() {
 // (readRangeSingleMillimeters() also calls this function after starting a
 // single-shot range measurement)
 uint16_t VL53L0X::readRangeContinuousMillimeters() {
+    last_status = ESP_OK;
     startTimeout();
     while ((readReg(RESULT_INTERRUPT_STATUS) & 0x07) == 0) {
-        if (checkTimeoutExpired()) {
+        if (last_status != ESP_OK || checkTimeoutExpired()) {
             did_timeout = true;
             return 65535;
         }
@@ -770,7 +765,7 @@ uint16_t VL53L0X::readRangeSingleMillimeters() {
     // "Wait until start bit has been cleared"
     startTimeout();
     while (readReg(SYSRANGE_START) & 0x01) {
-        if (checkTimeoutExpired()) {
+        if (last_status != ESP_OK || checkTimeoutExpired()) {
             did_timeout = true;
             return 65535;
         }
@@ -810,7 +805,7 @@ bool VL53L0X::getSpadInfo(uint8_t* count, bool* type_is_aperture) {
     writeReg(0x83, 0x00);
     startTimeout();
     while (readReg(0x83) == 0x00) {
-        if (checkTimeoutExpired()) {
+        if (last_status != ESP_OK || checkTimeoutExpired()) {
             return false;
         }
     }
@@ -929,7 +924,7 @@ bool VL53L0X::performSingleRefCalibration(uint8_t vhv_init_byte) {
 
     startTimeout();
     while ((readReg(RESULT_INTERRUPT_STATUS) & 0x07) == 0) {
-        if (checkTimeoutExpired()) {
+        if (last_status != ESP_OK || checkTimeoutExpired()) {
             return false;
         }
     }

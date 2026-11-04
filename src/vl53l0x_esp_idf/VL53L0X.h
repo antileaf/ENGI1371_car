@@ -94,7 +94,7 @@ class VL53L0X {
     enum vcselPeriodType { VcselPeriodPreRange,
                            VcselPeriodFinalRange };
 
-    uint8_t last_status;  // status of last I2C transmission
+    esp_err_t last_status = ESP_OK;  // first bus error in the current operation
 
     VL53L0X();
 

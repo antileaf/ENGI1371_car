@@ -2,6 +2,14 @@
 #include <cassert>
 #include <cstdio>
 int main() {
+	servo::setup_late();
+	servo::disable();
+	servo::enable(73);
+	assert(devices::servo.attached() && devices::servo.angle==73);
+	devices::tof1.last_status=1;
+	float left, right;
+	assert(!tof::readDistances(left, right) && isnan(left) && isfinite(right));
+	devices::tof1.last_status=0;
 	hardware_test::setup();
 	assert(devices::servo.angle==hardware_test::SERVO_ANGLE);
 	Serial.input="12"; hardware_test::update();
@@ -18,10 +26,10 @@ int main() {
 	assert(Serial.output.str().find("tof1=")!=std::string::npos);
 	assert(Serial.output.str().find("encA=")==std::string::npos);
 	motor::brakeMotors();
-	assert(levels[ports::ENA]==HIGH && levels[ports::ENB]==HIGH);
+	assert(pwm[ports::ENA]==255 && pwm[ports::ENB]==255);
 	assert(levels[ports::IN_1]==LOW && levels[ports::IN_2]==LOW);
 	assert(levels[ports::IN_3]==LOW && levels[ports::IN_4]==LOW);
 	motor::stopMotors();
-	assert(levels[ports::ENA]==LOW && levels[ports::ENB]==LOW);
+	assert(pwm[ports::ENA]==0 && pwm[ports::ENB]==0);
 	puts("Encoder-free hardware test checks passed");
 }

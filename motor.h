@@ -9,7 +9,7 @@ void setMotor(int enablePin, int in1, int in2, int speed) {
 
 	if (speed == 0) {
 		// 关闭对应桥臂，让车轮惯性滑停。
-		digitalWrite(enablePin, LOW);
+		analogWrite(enablePin, 0);
 		digitalWrite(in1, LOW);
 		digitalWrite(in2, LOW);
 		return;
@@ -39,8 +39,8 @@ void stopMotors() {
 void brakeMotors() {
 	// 两个方向脚已由 stopMotors() 拉低，再使能以执行电气制动。
 	stopMotors();
-	digitalWrite(ports::ENA, HIGH);
-	digitalWrite(ports::ENB, HIGH);
+	analogWrite(ports::ENA, 255);
+	analogWrite(ports::ENB, 255);
 }
 
 void setup_early() {

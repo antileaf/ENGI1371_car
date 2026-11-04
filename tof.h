@@ -7,13 +7,13 @@ namespace tof {
 
 // 读取一个已启动连续测距的传感器，距离单位统一为米。
 // 读取会等待测量完成，最长等待时间由 setTimeout() 设置。
-// 超时返回 false，并将距离设为 NAN；使用读数前必须检查返回值。
+// 超时或总线传输失败时返回 false，距离设为 NAN。
 inline bool readDistance(VL53L0X &sensor, float &distanceMetres) {
 	distanceMetres = NAN;
 
 	const uint16_t distanceMm = sensor.readRangeContinuousMillimeters();
 
-	if (sensor.timeoutOccurred())
+	if (sensor.timeoutOccurred() || sensor.last_status != 0)
 		return false;
 
 	distanceMetres = distanceMm / 1000.0f;
@@ -21,9 +21,8 @@ inline bool readDistance(VL53L0X &sensor, float &distanceMetres) {
 }
 
 // 按传感器 1、2 的顺序读取，不预设它们在车上的左右位置。
-// 两个传感器都会被读取；仅当两次读取均未超时时返回 true。
-// 单个传感器超时只会将其对应输出设为 NAN，另一个读数仍保留。
-// 此接口只检查通信超时，不代表测距质量已通过验证。
+// 两次通信均成功才返回 true。单侧失败保留另一侧读数。
+// 此接口检查通信，不评估光学测距质量。
 inline bool readDistances(float &distance1Metres, float &distance2Metres) {
 	const bool valid1 = readDistance(devices::tof1, distance1Metres);
 	const bool valid2 = readDistance(devices::tof2, distance2Metres);
@@ -52,7 +51,10 @@ bool setup_late() {
 
 	// 两颗传感器共用总线，通过独立 XSHUT 依次分配地址。
 #if defined(ARDUINO_ARCH_ESP32)
-	i2c.init(ports::TOF_SCL, ports::TOF_SDA);
+	if (i2c.init(ports::TOF_SCL, ports::TOF_SDA) != ESP_OK) {
+		Serial.println("ToF I2C initialization failed!");
+		return false;
+	}
 #else
 	Wire.begin();
 #endif
@@ -63,25 +65,29 @@ bool setup_late() {
 	// 初始化传感器 1
 	enableSensor(ports::XSHUT_1);
 
-	const bool firstReady = devices::tof1.init();
+	bool firstReady = devices::tof1.init();
+	if (firstReady) {
+		devices::tof1.setAddress(0x30);
+		firstReady = devices::tof1.last_status == 0;
+	}
 	if (!firstReady) {
 		Serial.println("Sensor 1 initialization failed!");
 		// 隔离可能仍占用默认地址的设备，再检查第二个传感器。
 		disableSensor(ports::XSHUT_1);
 	}
-	else
-		devices::tof1.setAddress(0x30);
 
 	// 初始化传感器 2
 	enableSensor(ports::XSHUT_2);
 
-	const bool secondReady = devices::tof2.init();
+	bool secondReady = devices::tof2.init();
+	if (secondReady) {
+		devices::tof2.setAddress(0x31);
+		secondReady = devices::tof2.last_status == 0;
+	}
 	if (!secondReady) {
 		Serial.println("Sensor 2 initialization failed!");
 		disableSensor(ports::XSHUT_2);
 	}
-	else
-		devices::tof2.setAddress(0x31);
 
 	// 开始连续测距
 	if (!firstReady || !secondReady)
@@ -90,7 +96,7 @@ bool setup_late() {
 	devices::tof1.startContinuous(50);
 	devices::tof2.startContinuous(50);
 	
-	return true;
+	return devices::tof1.last_status == 0 && devices::tof2.last_status == 0;
 }
 
 }

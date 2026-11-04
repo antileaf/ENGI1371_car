@@ -8,6 +8,7 @@ void reset(uint32_t time=0) {
 	nowUs=time; echoUs=5800;
 	devices::tof1.mm=devices::tof2.mm=300;
 	devices::tof1.timeout=devices::tof2.timeout=false;
+	devices::tof1.last_status=devices::tof2.last_status=0;
 	devices::tof1.waitUs=devices::tof2.waitUs=0;
 	assert(start(50,60));
 }
@@ -24,6 +25,10 @@ int main() {
 	assert(getTelemetry().status==Status::Running);
 	assert(getTelemetry().pwmA==50 && getTelemetry().pwmB==60);
 	assert(levels[ports::IN_1]==HIGH && levels[ports::IN_4]==HIGH);
+	devices::tof2.last_status=1;
+	tick();
+	assert(getTelemetry().status==Status::SensorFault);
+	assert(pwm[ports::ENA]==0 && pwm[ports::ENB]==0);
 	assert(fabsf(getTelemetry().appliedPhi)<1e-6f);
 	// 中心点仍有横移时必须纠偏；返回中心时 D 项与 P 项相反。
 	assert(steeringDemand(0,.03f)<0);
