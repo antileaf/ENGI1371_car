@@ -38,6 +38,8 @@ inline esp_err_t telemetry(httpd_req_t *req) {
 	json += s.timeMs;
 	json += ",\"status\":";
 	json += static_cast<int>(d.status);
+	json += ",\"issues\":";
+	json += static_cast<int>(d.sensorIssues);
 	json += ",\"mode\":";
 	json += s.initFailed ? "\"failed\"" : s.testMode ? "\"test\"" : "\"control\"";
 	auto field = [&](const char *key, float value) {

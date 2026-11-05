@@ -63,11 +63,13 @@ void VL53L0X::setAddress(uint8_t new_addr) {
 // mode.
 bool VL53L0X::init(bool io_2v8) {
     last_status = ESP_OK;
+    initStage = "model ID";
     // check model ID register (value specified in datasheet)
     if (readReg(IDENTIFICATION_MODEL_ID) != 0xEE) {
         return false;
     }
 
+    initStage = "register setup / SPAD";
     // VL53L0X_DataInit() begin
 
     // sensor uses 1V8 mode for I/O by default; switch to 2V8 mode if necessary
@@ -262,6 +264,8 @@ bool VL53L0X::init(bool io_2v8) {
 
     // VL53L0X_PerformRefCalibration() begin (VL53L0X_perform_ref_calibration())
 
+    if (last_status != ESP_OK) return false;
+    initStage = "VHV calibration";
     // -- VL53L0X_perform_vhv_calibration() begin
 
     writeReg(SYSTEM_SEQUENCE_CONFIG, 0x01);
@@ -271,6 +275,7 @@ bool VL53L0X::init(bool io_2v8) {
 
     // -- VL53L0X_perform_vhv_calibration() end
 
+    initStage = "phase calibration";
     // -- VL53L0X_perform_phase_calibration() begin
 
     writeReg(SYSTEM_SEQUENCE_CONFIG, 0x02);
@@ -280,6 +285,7 @@ bool VL53L0X::init(bool io_2v8) {
 
     // -- VL53L0X_perform_phase_calibration() end
 
+    initStage = "restore sequence config";
     // "restore the previous Sequence Config"
     writeReg(SYSTEM_SEQUENCE_CONFIG, 0xE8);
 

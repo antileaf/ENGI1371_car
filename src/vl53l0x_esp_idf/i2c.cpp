@@ -5,6 +5,9 @@
 
 _i2c i2c;
 
+// Allow scheduler jitter; keep bus failure detection bounded.
+static const TickType_t transferTimeout = pdMS_TO_TICKS(5) + 1;
+
 esp_err_t _i2c::init(int scl, int sda) {
     i2c_config_t conf = {};
     const int I2C_MASTER_SCL_IO = scl;       /*!< GPIO number used for I2C master clock */
@@ -25,11 +28,11 @@ esp_err_t _i2c::init(int scl, int sda) {
 }
 
 esp_err_t _i2c::write(uint8_t addr, const uint8_t* data, size_t size) {
-    return i2c_master_write_to_device(i2c_master_port, addr, data, size, 1);
+    return i2c_master_write_to_device(i2c_master_port, addr, data, size, transferTimeout);
 }
 
 esp_err_t _i2c::readRegister(uint8_t addr, uint8_t reg, uint8_t* data, size_t size) {
     // IDF uses a repeated START and NACKs the final byte.
-    return i2c_master_write_read_device(i2c_master_port, addr, &reg, 1, data, size, 1);
+    return i2c_master_write_read_device(i2c_master_port, addr, &reg, 1, data, size, transferTimeout);
 }
 #endif

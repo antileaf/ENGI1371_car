@@ -9,12 +9,14 @@
 #include "hardware_test.h"
 #include "runtime_debug.h"
 
-#if defined(CONFIG_IDF_TARGET_ESP32S3)
+#define ENABLE_WEB_DEBUG 1
+
+#if defined(CONFIG_IDF_TARGET_ESP32S3) && ENABLE_WEB_DEBUG
 #include "web_debug.h"
 #endif
 
 // true：传感器、电机联合测试，不执行其它逻辑
-constexpr bool hardware_test_mode = true;
+constexpr bool hardware_test_mode = false;
 // true：启用 Wi-Fi 调试网页。关闭时串口调试仍可用。
 constexpr bool enable_web_debug = true;
 // 前进 PWM 在 calibration.h 的 DEFAULT_PWM_A/B 中配置。
@@ -28,14 +30,19 @@ void setup() {
 	motor::setup_early();
 
 	Serial.begin(115200);
-#if defined(CONFIG_IDF_TARGET_ESP32S3)
+#if defined(CONFIG_IDF_TARGET_ESP32S3) && ENABLE_WEB_DEBUG
 	if constexpr (enable_web_debug)
 		web_debug::begin();
 #endif
 
 	ultrasonic::setup_late();
-	if (!tof::setup_late())
+	if (!tof::setup_late()) {
 		initializationFailed = true;
+		control::recordTofInitFailure(tof::firstInitialized, tof::secondInitialized);
+		Serial.print(F("ToF startup unavailable:"));
+		runtime_debug::printSensorIssues(control::getTelemetry().sensorIssues);
+		Serial.println();
+	}
 	servo::setup_late();
 	motor::setup_late();
 
@@ -53,7 +60,7 @@ void setup() {
 		servo::disable();
 		Serial.println(F("Initialization failed. Vehicle stopped."));
 	}
-#if defined(CONFIG_IDF_TARGET_ESP32S3)
+#if defined(CONFIG_IDF_TARGET_ESP32S3) && ENABLE_WEB_DEBUG
 	if constexpr (enable_web_debug)
 		web_debug::publish(initializationFailed, hardware_test_mode);
 #endif
@@ -69,7 +76,7 @@ void loop() {
 	}
 
 	control::update();
-#if defined(CONFIG_IDF_TARGET_ESP32S3)
+#if defined(CONFIG_IDF_TARGET_ESP32S3) && ENABLE_WEB_DEBUG
 	if constexpr (enable_web_debug)
 		web_debug::publish(false, false);
 #endif
@@ -78,12 +85,17 @@ void loop() {
 	// 状态变化立即报告，详细调试数据每 1000 ms 输出一次。
 	static control::Status previousStatus = control::Status::Stopped;
 	const control::Status status = control::getTelemetry().status;
-	if (status != previousStatus) {
+	static uint8_t previousIssues = 0;
+	const uint8_t issues = control::getTelemetry().sensorIssues;
+	if (status != previousStatus || issues != previousIssues) {
 		Serial.print("Control status: ");
 		Serial.print(static_cast<int>(status));
 		Serial.print(F(" ("));
 		runtime_debug::printStatus(status);
-		Serial.println(F(")"));
+		Serial.print(F(") sensors="));
+		runtime_debug::printSensorIssues(issues);
+		Serial.println();
+		previousIssues = issues;
 		previousStatus = status;
 	}
 }

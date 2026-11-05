@@ -174,23 +174,25 @@ inline bool servoAngleToWheel(float servoDeg, float &phiRad) {
 
 constexpr uint32_t CONTROL_PERIOD_US = 60000UL;
 constexpr uint32_t MAX_CONTROL_GAP_US = 200000UL;
-constexpr float STOP_DISTANCE = 0.30f; // 需按实测制动距离调整
+constexpr float STOP_DISTANCE = 0.25f; // 需按实测制动距离调整
 constexpr uint8_t OBSTACLE_CONFIRM_FRAMES = 3; // 连续近距离有效回波达到此帧数才停车
 static_assert(OBSTACLE_CONFIRM_FRAMES > 0, "Obstacle confirmation requires at least one frame");
-constexpr float RESUME_DISTANCE = 0.35f; // 恢复阈值高于停车阈值，避免反复启停
+constexpr float RESUME_DISTANCE = 0.30f; // 恢复阈值高于停车阈值，避免反复启停
 static_assert(RESUME_DISTANCE > STOP_DISTANCE, "Resume distance must exceed stop distance");
 constexpr uint32_t RESTART_WAIT_US = 2000000UL; // 连续畅通 2 秒后重新采样起步
 constexpr uint32_t OBSTACLE_LOCK_US = 60000000UL; // 连续受阻 60 秒后锁定停机
 
 // PWM 表示驱动力而非实测车速；两侧独立配置前进指令绝对值。
 constexpr int MAX_PWM = 150;
+static_assert(calibration::MIN_DRIVE_PWM > 0 && calibration::MIN_DRIVE_PWM <= MAX_PWM,
+	"Minimum drive PWM must be within the allowed drive range");
 constexpr float PWM_RAMP_PER_SECOND = 40.0f;
 constexpr float MAX_STEER_RATE = 30.0f * PI / 180.0f;
-// 初始调试值：P 单位 rad/m，D 单位 rad/(m/s)，需实车低速调参。
-constexpr float OFFSET_KP = 2.5f, OFFSET_KD = 3.0f;
-constexpr float OFFSET_DEADBAND = 0.003f; // 仅 P 项使用死区，过中心时保留 D 项
+// 误差为两侧距离差除以总距离。按总间隙 0.60 m 换算旧增益，窄道纠偏更强。
+constexpr float OFFSET_KP = 1.2f, OFFSET_KD = 0.45f;
+constexpr float OFFSET_DEADBAND = 0.01f; // 仅 P 项使用死区，过中心时保留 D 项
 constexpr float OFFSET_FILTER_SECONDS = 0.10f, RATE_FILTER_SECONDS = 0.12f;
-constexpr float MAX_OFFSET_RATE = 0.30f; // 限制突变引起的 D 项
+constexpr float MAX_OFFSET_RATE = 1.0f; // 限制突变引起的 D 项
 constexpr int HISTORY_SIZE = 5;
 
 // 保留原编号，删除已不使用的轮速相关状态。
@@ -207,7 +209,10 @@ enum class Status {
 	ObstacleLocked = 12,
 };
 
+enum SensorIssue : uint8_t { ToF1Invalid = 1, ToF2Invalid = 2, FrontNoEcho = 4, FrontInvalid = 8 };
+
 struct Telemetry {
+	uint8_t sensorIssues = 0;
 	Status status = Status::Stopped;
 	float frontDistance = NAN, tofLeft = NAN, tofRight = NAN;
 	float rawOffset = 0, offset = 0, offsetRate = 0;
@@ -226,6 +231,10 @@ static uint32_t lastSampleUs = 0, lastObstacleCheckUs = 0, clearSinceUs = 0, blo
 static bool trackingBlocked = false;
 static int requestedA = DEFAULT_PWM_A, requestedB = DEFAULT_PWM_B;
 static float ramp = 0;
+}
+
+inline void recordTofInitFailure(bool firstReady, bool secondReady) {
+	runtime::telemetry.sensorIssues = (firstReady ? 0 : ToF1Invalid) | (secondReady ? 0 : ToF2Invalid);
 }
 
 inline const Telemetry &getTelemetry() { return runtime::telemetry; }
@@ -273,6 +282,23 @@ inline bool start(int pwmA = DEFAULT_PWM_A, int pwmB = DEFAULT_PWM_B) {
 	return true;
 }
 
+// A missing echo can also mean the path is outside the measurable range.
+inline bool sampleFront() {
+	auto &t = runtime::telemetry;
+	t.sensorIssues &= ~(FrontNoEcho | FrontInvalid);
+	if (!ultrasonic::readDistance(t.frontDistance, 12000UL)) {
+		t.sensorIssues |= FrontNoEcho;
+		return false;
+	}
+	constexpr float minimumEchoMetres = 0.02f;
+	if (!isfinite(t.frontDistance) || t.frontDistance < minimumEchoMetres) {
+		t.frontDistance = NAN;
+		t.sensorIssues |= FrontInvalid;
+		return false;
+	}
+	return true;
+}
+
 inline void updateObstacleRecovery() {
 	const uint32_t now = static_cast<uint32_t>(micros());
 	const uint32_t gap = now - runtime::lastObstacleCheckUs;
@@ -287,25 +313,23 @@ inline void updateObstacleRecovery() {
 		runtime::trackingBlocked = false; // 未观测的间隔不计入连续受阻时间
 	}
 
-	float front;
-	// 无回波按畅通处理，NAN 仅表示没有实际距离读数。
-	const bool hasEcho = ultrasonic::readDistance(front, 12000UL);
-	if (!hasEcho)
-		front = NAN;
-	if (hasEcho && (!isfinite(front) || front <= 0)) {
-		stop(Status::SensorFault); return;
-	}
-
+	const bool hasEcho = sampleFront();
 	const uint32_t sampledAt = static_cast<uint32_t>(micros());
 	runtime::lastObstacleCheckUs = sampledAt;
-	runtime::telemetry.frontDistance = front;
+
 
 	if (sampledAt - now > MAX_CONTROL_GAP_US) {
 		stop(Status::TimingFault);
 		return;
 	}
 
-	if (hasEcho && front <= RESUME_DISTANCE) {
+	if (runtime::telemetry.sensorIssues & FrontInvalid) {
+		runtime::telemetry.status = Status::Obstacle;
+		runtime::trackingBlocked = false;
+		runtime::clearSinceUs = 0;
+		return;
+	}
+	if (hasEcho && runtime::telemetry.frontDistance <= RESUME_DISTANCE) {
 		runtime::telemetry.status = Status::Obstacle;
 		runtime::clearSinceUs = 0;
 
@@ -407,16 +431,8 @@ inline void update() {
 		return;
 	}
 
-	float front, first, second;
-	const bool hasEcho = ultrasonic::readDistance(front,12000UL);
-	telemetry.frontDistance = hasEcho ? front : NAN;
-
-	if (hasEcho && (!isfinite(front) || front <= 0)) {
-		stop(Status::SensorFault);
-		return;
-	}
-
-	if (hasEcho && front <= STOP_DISTANCE) {
+	float first, second;
+	if (sampleFront() && telemetry.frontDistance <= STOP_DISTANCE) {
 		if (++obstacleFrames >= OBSTACLE_CONFIRM_FRAMES) {
 			stop(Status::Obstacle);
 			return;
@@ -425,14 +441,19 @@ inline void update() {
 	else
 		obstacleFrames = 0;
 	
-	const bool valid = tof::readDistances(first, second);
+	tof::readDistances(first, second);
+	telemetry.sensorIssues &= ~(ToF1Invalid | ToF2Invalid);
+	if (!isfinite(first) || first <= 0 || first > 2) {
+		telemetry.sensorIssues |= ToF1Invalid;
+		first = NAN;
+	}
+	if (!isfinite(second) || second <= 0 || second > 2) {
+		telemetry.sensorIssues |= ToF2Invalid;
+		second = NAN;
+	}
 	telemetry.tofLeft = TOF1_IS_LEFT ? first : second;
 	telemetry.tofRight = TOF1_IS_LEFT ? second : first;
 
-	if (!valid || !isfinite(first) || !isfinite(second) || first <= 0 || second <= 0 || first > 2 || second > 2) {
-		stop(Status::SensorFault);
-		return;
-	}
 
 	const uint32_t sampledAt = static_cast<uint32_t>(micros());
 	const uint32_t elapsed = sampledAt-lastSampleUs;
@@ -443,14 +464,22 @@ inline void update() {
 
 	const float dt = elapsed * 1e-6f;
 	lastSampleUs = sampledAt;
-	observeOffset((telemetry.tofRight - telemetry.tofLeft) * 0.5f, sampledAt, dt);
-	
-	// 收满历史前电机保持停止，舵机保持归中。
-	if (sampleCount < HISTORY_SIZE)
-		return;
-
+	const bool tofFault = telemetry.sensorIssues & (ToF1Invalid | ToF2Invalid);
+	if (tofFault) {
+		sampleCount = 0;
+		telemetry.rawOffset = telemetry.offset = telemetry.offsetRate = NAN;
+		telemetry.pTerm = telemetry.dTerm = 0;
+		telemetry.desiredPhi = 0;
+	} else {
+		if (sampleCount == 0) telemetry.offsetRate = 0;
+		const float totalClearance = telemetry.tofRight + telemetry.tofLeft;
+		observeOffset((telemetry.tofRight - telemetry.tofLeft) / totalClearance, sampledAt, dt);
+	}
+	const bool steeringReady = sampleCount == HISTORY_SIZE;
+	// Never launch from rest with missing history. While moving, steer toward centre.
+	if (!steeringReady && telemetry.pwmA == 0) return;
 	telemetry.status = Status::Running;
-	telemetry.desiredPhi = steeringDemand(telemetry.offset, telemetry.offsetRate);
+	telemetry.desiredPhi = steeringReady ? steeringDemand(telemetry.offset, telemetry.offsetRate) : 0;
 
 	const float step = MAX_STEER_RATE * dt;
 	const float requestedChange = telemetry.desiredPhi - telemetry.appliedPhi;
@@ -466,11 +495,32 @@ inline void update() {
 	telemetry.appliedPhi = phi;
 	telemetry.servoDegrees = degrees;
 
-	// 两侧同比缓起步，保留独立调平比例，不伪造实际轮速。
-	const int largest = requestedA > requestedB ? requestedA : requestedB;
-	ramp = fminf(1.0f, ramp + PWM_RAMP_PER_SECOND * dt / largest);
-	telemetry.pwmA = static_cast<int>(lroundf(requestedA * ramp));
-	telemetry.pwmB = static_cast<int>(lroundf(requestedB * ramp));
+	// 从最低有效 PWM 起步，只对高于下限的部分做斜坡。
+	const int floorPwm = calibration::MIN_DRIVE_PWM;
+	const int spanA = requestedA > floorPwm ? requestedA - floorPwm : 0;
+	const int spanB = requestedB > floorPwm ? requestedB - floorPwm : 0;
+	const int span = spanA > spanB ? spanA : spanB;
+	if (!steeringReady) ramp = 0;
+	else {
+		// 即使直行目标等于最低 PWM，转弯增速也要经过起步斜坡。
+		const int rampSpan = span > 0 ? span : MAX_PWM - floorPwm;
+		ramp = rampSpan > 0 ? fminf(1.0f, ramp + PWM_RAMP_PER_SECOND * dt / rampSpan) : 1.0f;
+	}
+	telemetry.pwmA = !steeringReady ? floorPwm : floorPwm + static_cast<int>(lroundf(spanA * ramp));
+	telemetry.pwmB = !steeringReady ? floorPwm : floorPwm + static_cast<int>(lroundf(spanB * ramp));
+	// 依据限速后的前轮指令做开环差速：左转内轮 B，右转内轮 A。
+	if (steeringReady && phi != 0) {
+		int &innerPwm = phi > 0 ? telemetry.pwmB : telemetry.pwmA;
+		int &outerPwm = phi > 0 ? telemetry.pwmA : telemetry.pwmB;
+		const float turn = fabsf(phi) / MAX_STEER;
+		const float reduction = calibration::MAX_INNER_PWM_REDUCTION * turn;
+		const int reducedPwm = static_cast<int>(lroundf(innerPwm * (1.0f - reduction)));
+		innerPwm = reducedPwm < floorPwm ? floorPwm : reducedPwm;
+		// 满舵时外轮目标为 MAX_PWM，增量与起步进度同步。
+		const int outerTarget = phi > 0 ? floorPwm + spanA : floorPwm + spanB;
+		const int boost = static_cast<int>(lroundf((MAX_PWM - outerTarget) * turn * ramp));
+		outerPwm = constrain(outerPwm + boost, floorPwm, MAX_PWM);
+	}
 	motor::motorA(telemetry.pwmA * MOTOR_A_DIRECTION);
 	motor::motorB(telemetry.pwmB * MOTOR_B_DIRECTION);
 }

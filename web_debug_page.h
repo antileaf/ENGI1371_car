@@ -23,7 +23,7 @@ section{margin:12px 0}p{margin:8px 0;font-size:14px}
 const el=id=>document.getElementById(id);
 const groups=[
  ['距离传感器',[['left','左 ToF','m'],['right','右 ToF','m'],['front','前方超声波','m']]],
- ['横向控制',[['raw','原始偏移','m'],['offset','滤波偏移','m'],['rate','偏移变化率','m/s'],['p','比例项','rad'],['d','微分项','rad']]],
+ ['横向控制',[['raw','原始偏差比例',''],['offset','滤波偏差比例',''],['rate','比例变化率','1/s'],['p','比例项','rad'],['d','微分项','rad']]],
  ['转向与动力',[['desired','目标转角','rad'],['applied','应用转角','rad'],['servo','舵机指令','°'],['a','电机 A','PWM'],['b','电机 B','PWM']]]];
 for(const [title,rows] of groups){
  const card=document.createElement('article');
@@ -55,6 +55,8 @@ async function poll(){
    if(!res.ok)throw Error();
    const s=await res.json(),live=s.mode==='control'&&s.ms>0;
    el('state').textContent=s.mode==='failed'?'初始化失败 · 已停车':s.mode==='test'?'硬件测试模式':s.ms===0?'正在初始化':states[s.status]||'未知状态';
+   const issues=[[1,'ToF 1 异常'],[2,'ToF 2 异常'],[4,'超声波无回波'],[8,'超声波回波无效']].filter(([bit])=>s.issues&bit);
+   if(issues.length) el('state').textContent+=' · '+issues.map(([,label])=>label).join('、');
    el('link').textContent='已连接 · 控制器快照 '+(s.ms/1000).toFixed(1)+' s';
    for(const [,rows] of groups)for(const [key,,unit] of rows){
      el(key).textContent=live&&Number.isFinite(s[key])?s[key].toFixed(unit==='PWM'?0:unit==='°'?1:3)+' '+unit:'—';

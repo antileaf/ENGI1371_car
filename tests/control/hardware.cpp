@@ -20,7 +20,7 @@ int main() {
 	assert(devices::servo.angle==120);
 	Serial.input="0\n"; hardware_test::update(); assert(devices::servo.angle==0);
 	Serial.input="180\n"; hardware_test::update(); assert(devices::servo.angle==180);
-	assert(pwm[ports::ENA]==50 && pwm[ports::ENB]==50);
+	assert(pwm[ports::ENA]==hardware_test::TEST_PWM && pwm[ports::ENB]==hardware_test::TEST_PWM);
 	assert(levels[ports::IN_1]==HIGH && levels[ports::IN_4]==HIGH);
 	nowUs+=250000; hardware_test::update();
 	assert(Serial.output.str().find("tof1=")!=std::string::npos);

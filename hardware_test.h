@@ -7,15 +7,15 @@
 
 namespace hardware_test {
 
-constexpr int TEST_PWM = 50; // 沿用原电机测试的 PWM
+constexpr int TEST_PWM = 120; // 沿用原电机测试的 PWM
 constexpr int SERVO_ANGLE = static_cast<int>(calibration::SERVO_CENTRE_DEG + 0.5f);
 constexpr uint32_t OUTPUT_PERIOD_MS = 250;
 static uint32_t lastOutputMs = 0;
 static int pwmA = 0, pwmB = 0;
 
 inline void applyOutputs() {
-	pwmA = TEST_PWM * calibration::MOTOR_A_DIRECTION;
-	pwmB = TEST_PWM * calibration::MOTOR_B_DIRECTION;
+	// pwmA = TEST_PWM * calibration::MOTOR_A_DIRECTION;
+	// pwmB = TEST_PWM * calibration::MOTOR_B_DIRECTION;
 
 	motor::motorA(pwmA);
 	motor::motorB(pwmB);
