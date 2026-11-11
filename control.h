@@ -187,7 +187,7 @@ constexpr int MAX_PWM = 150;
 static_assert(calibration::MIN_DRIVE_PWM > 0 && calibration::MIN_DRIVE_PWM <= MAX_PWM,
 	"Minimum drive PWM must be within the allowed drive range");
 constexpr float PWM_RAMP_PER_SECOND = 40.0f;
-constexpr float MAX_STEER_RATE = 30.0f * PI / 180.0f;
+constexpr float MAX_STEER_RATE = 45.0f * PI / 180.0f;
 // 误差为两侧距离差除以总距离。按总间隙 0.60 m 换算旧增益，窄道纠偏更强。
 constexpr float OFFSET_KP = 1.2f, OFFSET_KD = 0.45f;
 constexpr float OFFSET_DEADBAND = 0.01f; // 仅 P 项使用死区，过中心时保留 D 项

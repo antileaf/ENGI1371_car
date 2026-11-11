@@ -46,7 +46,6 @@ inline void setup_early() {
 	disableSensor(ports::XSHUT_2);
 }
 
-#if defined(ARDUINO_ARCH_ESP32)
 inline bool probeModel(int sensor, const char *stage, uint8_t address) {
 	uint8_t model = 0;
 	const esp_err_t err = i2c.readRegister(address, VL53L0X::IDENTIFICATION_MODEL_ID, &model, 1);
@@ -55,39 +54,30 @@ inline bool probeModel(int sensor, const char *stage, uint8_t address) {
 	Serial.println();
 	return err == ESP_OK && model == 0xEE;
 }
-#endif
 
 inline bool bringUp(VL53L0X &sensor, int number, int xshut, uint8_t address) {
 	enableSensor(xshut);
-#if defined(ARDUINO_ARCH_ESP32)
 	Serial.printf("[ToF %d] released XSHUT GPIO%d level=%d\n", number, xshut, digitalRead(xshut));
 	if (!probeModel(number, "boot", 0x29)) return false;
-#endif
 	if (!sensor.init()) {
-#if defined(ARDUINO_ARCH_ESP32)
 		Serial.printf("[ToF %d] init failed at %s I2C=%s\n", number, sensor.initStage, esp_err_to_name(sensor.last_status));
-#else
-		Serial.print("ToF init failed: "); Serial.println(number);
-#endif
 		return false;
 	}
 	sensor.setAddress(address);
-#if defined(ARDUINO_ARCH_ESP32)
 	Serial.printf("[ToF %d] setAddress(0x%02X) I2C=%s\n", number, address, esp_err_to_name(sensor.last_status));
 	return sensor.last_status == ESP_OK && probeModel(number, "verify address", address);
-#else
-	return sensor.last_status == 0;
-#endif
 }
 
 static bool firstInitialized = false, secondInitialized = false;
 
 bool setup_late() {
 	firstInitialized = secondInitialized = false;
+	// XSHUT 复位后地址回到默认值，同步清除对象保存的旧地址和错误状态。
+	devices::tof1 = VL53L0X();
+	devices::tof2 = VL53L0X();
 	delay(10);
 
 	// 两颗传感器共用总线，通过独立 XSHUT 依次分配地址。
-#if defined(ARDUINO_ARCH_ESP32)
 	const esp_err_t bus = i2c.init(ports::TOF_SCL, ports::TOF_SDA);
 	Serial.printf("[ToF] I2C SDA=%d SCL=%d 100kHz init=%s\n", ports::TOF_SDA, ports::TOF_SCL, esp_err_to_name(bus));
 	if (bus != ESP_OK) {
@@ -95,9 +85,6 @@ bool setup_late() {
 	}
 	if (probeModel(0, "both XSHUT low; expect no reply", 0x29))
 		Serial.println("[ToF] Unexpected VL53L0X at 0x29; check both XSHUT connections");
-#else
-	Wire.begin();
-#endif
 
 	devices::tof1.setTimeout(500);
 	devices::tof2.setTimeout(500);
@@ -119,9 +106,7 @@ bool setup_late() {
 	devices::tof1.startContinuous(50);
 	devices::tof2.startContinuous(50);
 	
-#if defined(ARDUINO_ARCH_ESP32)
 	Serial.printf("[ToF] startContinuous: 1=%s 2=%s\n", esp_err_to_name(devices::tof1.last_status), esp_err_to_name(devices::tof2.last_status));
-#endif
 	firstInitialized = devices::tof1.last_status == 0;
 	secondInitialized = devices::tof2.last_status == 0;
 	return firstInitialized && secondInitialized;

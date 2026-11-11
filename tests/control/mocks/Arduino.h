@@ -29,6 +29,9 @@ struct SerialMock {
  int read(){if(input.empty()) return -1; int c=input.front(); input.erase(0,1); return c;}
  std::ostringstream output;
  void begin(int){}
+ template<class... Args> void printf(const char *format, Args... args){
+  char line[256]; snprintf(line,sizeof(line),format,args...); output<<line;
+ }
  template<class T> void print(T value){output<<value;}
  void print(float value,int){output<<value;}
  template<class T> void println(T value){print(value);println();}

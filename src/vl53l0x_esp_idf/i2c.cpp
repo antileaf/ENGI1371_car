@@ -1,5 +1,4 @@
 // Upstream: hirobon1690/vl53l0x-esp-idf @ 5c77c163d27d5bff4b5118508534fbdbfdffe318
-#if defined(ARDUINO_ARCH_ESP32)
 #include "i2c.h"
 #include <driver/i2c.h>
 
@@ -9,6 +8,13 @@ _i2c i2c;
 static const TickType_t transferTimeout = pdMS_TO_TICKS(5) + 1;
 
 esp_err_t _i2c::init(int scl, int sda) {
+    // 重试初始化时先释放上一次已安装的驱动，避免重复安装失败。
+    static bool installed = false;
+    if (installed) {
+        const esp_err_t removed = i2c_driver_delete(i2c_master_port);
+        if (removed != ESP_OK) return removed;
+        installed = false;
+    }
     i2c_config_t conf = {};
     const int I2C_MASTER_SCL_IO = scl;       /*!< GPIO number used for I2C master clock */
     const int I2C_MASTER_SDA_IO = sda;       /*!< GPIO number used for I2C master data  */
@@ -24,7 +30,9 @@ esp_err_t _i2c::init(int scl, int sda) {
     conf.clk_flags = 0;
     esp_err_t result = i2c_param_config(i2c_master_port, &conf);
     if (result != ESP_OK) return result;
-    return i2c_driver_install(i2c_master_port, conf.mode, I2C_MASTER_RX_BUF_DISABLE, I2C_MASTER_TX_BUF_DISABLE, 0);
+    result = i2c_driver_install(i2c_master_port, conf.mode, I2C_MASTER_RX_BUF_DISABLE, I2C_MASTER_TX_BUF_DISABLE, 0);
+    installed = result == ESP_OK;
+    return result;
 }
 
 esp_err_t _i2c::write(uint8_t addr, const uint8_t* data, size_t size) {
@@ -35,4 +43,3 @@ esp_err_t _i2c::readRegister(uint8_t addr, uint8_t reg, uint8_t* data, size_t si
     // IDF uses a repeated START and NACKs the final byte.
     return i2c_master_write_read_device(i2c_master_port, addr, &reg, 1, data, size, transferTimeout);
 }
-#endif

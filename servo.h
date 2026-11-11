@@ -1,9 +1,7 @@
 #pragma once
 
 #include "base.h"
-#if defined(CONFIG_IDF_TARGET_ESP32S3)
 #include <esp32-hal-matrix.h>
-#endif
 
 namespace servo {
 
@@ -27,11 +25,9 @@ void write(int angle) {
 // 停止控制脉冲，不改变当前目标角；这不是切断舵机电源。
 inline void disable() {
 	servo.detach();
-#if defined(CONFIG_IDF_TARGET_ESP32S3)
 	// Disconnect the MCPWM output before driving GPIO low.
 	pinMatrixOutDetach(ports::SERVO, false, false);
 	pinMode(ports::SERVO, OUTPUT);
-#endif
 	digitalWrite(ports::SERVO, LOW);
 }
 

@@ -1,5 +1,4 @@
 // Upstream: hirobon1690/vl53l0x-esp-idf @ 5c77c163d27d5bff4b5118508534fbdbfdffe318
-#if defined(ARDUINO_ARCH_ESP32)
 // Most of the functionality of this library is based on the VL53L0X API
 // provided by ST (STSW-IMG005), and some of the explanatory comments are quoted
 // or paraphrased from the API source code, API user manual (UM2039), and the
@@ -942,4 +941,3 @@ bool VL53L0X::performSingleRefCalibration(uint8_t vhv_init_byte) {
     return true;
 }
 
-#endif

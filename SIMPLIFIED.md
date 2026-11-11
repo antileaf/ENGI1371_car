@@ -39,4 +39,4 @@
 
 ## 验证
 
-运行 `tests/control/run.ps1`，覆盖 PD 符号/中心穿越修正、非均匀采样、时间回绕、PWM 缓起步和方向、转角限速、避障确认/恢复/锁定、传感器/时序故障及 PCHIP。Arduino CLI 用 `arduino:avr:uno` 编译；软件测试不代表实车闭环稳定性已验证。
+运行 `tests/control/run.ps1`，覆盖 PD 符号/中心穿越修正、非均匀采样、时间回绕、PWM 缓起步和方向、转角限速、避障确认/恢复/锁定、传感器/时序故障及 PCHIP。Arduino CLI 用 `esp32:esp32:esp32s3:FlashSize=16M,PSRAM=opi` 编译；软件测试不代表实车闭环稳定性已验证。
