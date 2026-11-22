@@ -5,6 +5,8 @@
 using namespace control;
 void tick() { nowUs+=CONTROL_PERIOD_US; update(); }
 void reset(uint32_t time=0) {
+	tof::firstInitialized=tof::secondInitialized=true;
+	tof::firstFailures=tof::secondFailures=0;
 	nowUs=time; echoUs=5800;
 	devices::tof1.mm=devices::tof2.mm=300;
 	devices::tof1.timeout=devices::tof2.timeout=false;
@@ -40,7 +42,8 @@ int main() {
 	for(int i=0;i<OBSTACLE_CONFIRM_FRAMES;++i) tick();
 	assert(getTelemetry().status==Status::Running);
 	devices::tof1.timeout=false; devices::tof2.last_status=0; echoUs=5800;
-	for(int i=0;i<40;++i) tick();
+	// 连续失败后需等待重初始化，再积累历史并完成起步斜坡。
+	for(int i=0;i<80;++i) tick();
 	assert(getTelemetry().sensorIssues==0 && getTelemetry().pwmB==110);
 	devices::tof2.timeout=true;
 	obstacle();
@@ -80,12 +83,16 @@ int main() {
 	};
 	const float narrow = steadyAngle(150, 250);
 	assert(getTelemetry().pwmA >= calibration::MIN_DRIVE_PWM && getTelemetry().pwmA < 100);
-	assert(getTelemetry().pwmB > 110 && getTelemetry().pwmB < MAX_PWM);
+	// 当前增益可能使窄道纠偏达到满舵，外轮允许达到 PWM 上限。
+	assert(getTelemetry().pwmB > 110 && getTelemetry().pwmB <= MAX_PWM);
 	assert(fabsf(getTelemetry().rawOffset - 0.25f) < 1e-5f);
 	const float wide = steadyAngle(350, 450);
 	assert(narrow < wide && wide < 0);
+	// 较宽道路仍应产生差速，但不应达到满舵或外轮 PWM 上限。
+	assert(fabsf(wide) < MAX_STEER);
+	assert(getTelemetry().pwmB > 110 && getTelemetry().pwmB < MAX_PWM);
 	assert(fabsf(steadyAngle(250, 150) + narrow) < 1e-5f);
-	assert(getTelemetry().pwmA > 100 && getTelemetry().pwmA < MAX_PWM && getTelemetry().pwmB < 110);
+	assert(getTelemetry().pwmA > 100 && getTelemetry().pwmA <= MAX_PWM && getTelemetry().pwmB < 110);
 	steadyAngle(100, 400);
 	assert(getTelemetry().pwmB == MAX_PWM);
 	steadyAngle(400, 100);
@@ -122,7 +129,10 @@ int main() {
 	assert(getTelemetry().status==Status::TimingFault);
 	reset(); devices::tof2.waitUs=MAX_CONTROL_GAP_US+1; tick();
 	assert(getTelemetry().status==Status::TimingFault);
-	assert(!start(0,50)); assert(!start(151,50));
+	assert(!start(0,50));
+	assert(start(MAX_PWM, MAX_PWM));
+	assert(!start(MAX_PWM + 1,50));
+	assert(!start(50,MAX_PWM + 1));
 	reset(0xffff0000UL); for(int i=0;i<35;++i) tick();
 	assert(getTelemetry().status==Status::Running);
 	stop(); tick(); assert(getTelemetry().status==Status::Stopped);

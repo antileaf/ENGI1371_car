@@ -6,6 +6,8 @@
 #include "src/vl53l0x_esp_idf/VL53L0X.h"
 
 namespace ports {
+// 板载 RGB 灯；默认跟随 Arduino 板卡定义，若实物不同可改为实际 GPIO。
+constexpr int STATUS_RGB = RGB_BUILTIN;
 constexpr int TOF_SDA = 8, TOF_SCL = 9;
 constexpr int XSHUT_1 = 10, XSHUT_2 = 11;
 constexpr int ULTRASONIC_TRIG = 12, ULTRASONIC_ECHO = 13;

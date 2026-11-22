@@ -8,6 +8,7 @@
 #include "control.h"
 #include "hardware_test.h"
 #include "runtime_debug.h"
+#include "boot_log.h"
 
 #define ENABLE_WEB_DEBUG 1
 
@@ -16,7 +17,7 @@
 #endif
 
 // true：传感器、电机联合测试，不执行其它逻辑
-constexpr bool hardware_test_mode = false;
+constexpr bool hardware_test_mode = true;
 // true：启用 Wi-Fi 调试网页。关闭时串口调试仍可用。
 constexpr bool enable_web_debug = ENABLE_WEB_DEBUG;
 // 前进 PWM 在 calibration.h 的 DEFAULT_PWM_A/B 中配置。
@@ -29,6 +30,7 @@ static uint8_t initializationAttempts = 0;
 static uint32_t initializationFailedAt = 0;
 
 void attemptInitialization() {
+	status_led::show(status_led::State::Initializing);
 	initializationFailed = false;
 	++initializationAttempts;
 
@@ -53,17 +55,21 @@ void attemptInitialization() {
 
 	servo::setup_late();
 	motor::setup_late();
+	status_led::update(!tof::firstInitialized, !tof::secondInitialized);
 
-	if (!initializationFailed) {
-		if constexpr (hardware_test_mode)
-			hardware_test::setup();
-		else if (!control::start()) {
+	if constexpr (hardware_test_mode) {
+		hardware_test::setup();
+		if (initializationFailed)
+			Serial.println(F("Hardware test: continuing with available modules."));
+	}
+	else {
+		if (!initializationFailed && !control::start()) {
 			Serial.println("Control start failed: check calibration and configuration.");
 			initializationFailed = true;
 		}
 	}
 
-	if (initializationFailed) {
+	if (initializationFailed && !hardware_test_mode) {
 		motor::stopMotors();
 		servo::disable();
 
@@ -74,7 +80,7 @@ void attemptInitialization() {
 		else
 			Serial.println(F("Initialization failed 3 times. Vehicle stopped."));
 	}
-	else {
+	else if (!initializationFailed) {
 		Serial.println(F("Initialization succeeded."));
 	}
 
@@ -89,8 +95,16 @@ void setup() {
 	ultrasonic::setup_early();
 	servo::setup_early();
 	motor::setup_early();
-
 	Serial.begin(115200);
+	// 先保存启动记录，避免在白灯等待期间再次复位而遗漏本次启动。
+	boot_log::begin();
+	// 每次开机仅闪一次白灯；先配置硬件引脚，模块重试不执行此段。
+	status_led::show(status_led::State::Boot);
+	delay(500);
+	status_led::show(status_led::State::Initializing);
+
+	serial_commands::printBootLog = boot_log::printRecords;
+	Serial.println(F("Send boot followed by Enter to print boot history."));
 	
 #if ENABLE_WEB_DEBUG
 	if constexpr (enable_web_debug)
@@ -101,19 +115,24 @@ void setup() {
 }
 
 void loop() {
-	if (initializationFailed) {
-		if (initializationAttempts < MAX_INITIALIZATION_ATTEMPTS &&
-				static_cast<uint32_t>(millis()) - initializationFailedAt >= INITIALIZATION_RETRY_MS)
-			attemptInitialization();
-		return;
-	}
-
 	if constexpr (hardware_test_mode) {
 		hardware_test::update();
 		return;
 	}
+	serial_commands::update(false);
+	if (initializationFailed) {
+		// 自动重试仅用于正式运行，硬件测试保留首次失败现场。
+		if constexpr (!hardware_test_mode) {
+			if (initializationAttempts < MAX_INITIALIZATION_ATTEMPTS &&
+					static_cast<uint32_t>(millis()) - initializationFailedAt >= INITIALIZATION_RETRY_MS)
+				attemptInitialization();
+		}
+		return;
+	}
 
 	control::update();
+	const uint8_t tofIssues = control::getTelemetry().sensorIssues;
+	status_led::update(tofIssues & control::ToF1Invalid, tofIssues & control::ToF2Invalid);
 
 #if ENABLE_WEB_DEBUG
 	if constexpr (enable_web_debug)

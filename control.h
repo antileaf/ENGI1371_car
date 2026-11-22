@@ -17,7 +17,7 @@ using calibration::MOTOR_A_DIRECTION;
 using calibration::MOTOR_B_DIRECTION;
 using calibration::DEFAULT_PWM_A;
 using calibration::DEFAULT_PWM_B;
-using calibration::MAX_STEER;
+constexpr float MAX_STEER = calibration::MAX_STEER_DEG * PI / 180.0f; // 控制计算使用弧度
 
 // PCHIP 保形三次插值经过所有实测点，连接处一阶导数连续。
 // 随着前轮向左转，舵机指令角度可以递增或递减，
@@ -421,6 +421,16 @@ inline void update() {
 
 	if (!active)
 		return;
+	if (tof::recoveryDue()) {
+		// 重初始化可能阻塞，先停车；完成后重新积累历史并走起步斜坡。
+		motor::stopMotors();
+		telemetry.pwmA = telemetry.pwmB = 0;
+		sampleCount = 0;
+		ramp = 0;
+		tof::retryFailedSensors();
+		lastSampleUs = static_cast<uint32_t>(micros());
+		return;
+	}
 	
 	const uint32_t now = static_cast<uint32_t>(micros());
 	if (now - lastSampleUs < CONTROL_PERIOD_US)
@@ -443,11 +453,11 @@ inline void update() {
 	
 	tof::readDistances(first, second);
 	telemetry.sensorIssues &= ~(ToF1Invalid | ToF2Invalid);
-	if (!isfinite(first) || first <= 0 || first > 2) {
+	if (!isfinite(first) || first <= 0 || first > calibration::TOF_MAX_DISTANCE_M) {
 		telemetry.sensorIssues |= ToF1Invalid;
 		first = NAN;
 	}
-	if (!isfinite(second) || second <= 0 || second > 2) {
+	if (!isfinite(second) || second <= 0 || second > calibration::TOF_MAX_DISTANCE_M) {
 		telemetry.sensorIssues |= ToF2Invalid;
 		second = NAN;
 	}

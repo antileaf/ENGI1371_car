@@ -4,18 +4,22 @@
 #include "ultrasonic.h"
 #include "motor.h"
 #include "servo.h"
+#include "status_led.h"
+#include "serial_commands.h"
 
 namespace hardware_test {
 
-constexpr int TEST_PWM = 120; // 沿用原电机测试的 PWM
+constexpr int TEST_PWM = 180; // 沿用原电机测试的 PWM
 constexpr int SERVO_ANGLE = static_cast<int>(calibration::SERVO_CENTRE_DEG + 0.5f);
 constexpr uint32_t OUTPUT_PERIOD_MS = 250;
 static uint32_t lastOutputMs = 0;
+constexpr uint32_t MOTOR_REFRESH_PERIOD_MS = 3000;
+static uint32_t lastMotorRefreshMs = 0;
 static int pwmA = 0, pwmB = 0;
 
 inline void applyOutputs() {
-	// pwmA = TEST_PWM * calibration::MOTOR_A_DIRECTION;
-	// pwmB = TEST_PWM * calibration::MOTOR_B_DIRECTION;
+	pwmA = TEST_PWM * calibration::MOTOR_A_DIRECTION;
+	pwmB = TEST_PWM * calibration::MOTOR_B_DIRECTION;
 
 	motor::motorA(pwmA);
 	motor::motorB(pwmB);
@@ -32,13 +36,14 @@ inline void setup() {
 	devices::tof2.setTimeout(25);
 
 	servo::write(SERVO_ANGLE);
-	Serial.println(F("Servo: send 0-180 degrees followed by CR or LF."));
+	Serial.println(F("Send servo angle 0-180 or boot, followed by CR or LF."));
 
 	lastOutputMs = static_cast<uint32_t>(millis());
 
 	Serial.println(F("Hardware test: ToF/front=m, open-loop PWM"));
 	
 	applyOutputs();
+	lastMotorRefreshMs = static_cast<uint32_t>(millis());
 }
 
 inline void printDistance(float value, bool valid) {
@@ -47,46 +52,39 @@ inline void printDistance(float value, bool valid) {
 }
 
 inline void readServoCommand() {
-	// 分帧接收十进制角度，遇到行尾才执行；错误行整行丢弃。
-	static int angle = 0;
-	static bool hasDigits = false, invalid = false;
-	while (Serial.available() > 0) {
-		const int c = Serial.read();
-		if (c == '\r' || c == '\n') {
-			if (invalid)
-				Serial.println(F("Invalid servo angle (expected 0-180)."));
-			else if (hasDigits) {
-				servo::write(angle);
-				Serial.print(F("servo_deg="));
-				Serial.println(angle);
-			}
-			angle = 0;
-			hasDigits = invalid = false;
-		}
-		else if (!invalid && c >= '0' && c <= '9') {
-			hasDigits = true;
-			angle = angle * 10 + (c - '0');
-			invalid = angle > 180;
-		}
-		else
-			invalid = true;
-	}
+	serial_commands::update(true);
 }
 
 // 连续固定 PWM 前进测试，测距仍有短暂阻塞；此模式不执行避障。
 inline void update() {
 	readServoCommand();
+	// 每 3 秒重新设置电机方向和 PWM，使用独立计时，不阻塞其它测试。
+	const uint32_t motorNow = static_cast<uint32_t>(millis());
+	if (motorNow - lastMotorRefreshMs >= MOTOR_REFRESH_PERIOD_MS) {
+		applyOutputs();
+		lastMotorRefreshMs = motorNow;
+	}
+	if (tof::recoveryDue()) {
+		tof::retryFailedSensors();
+	}
 	const uint32_t now = static_cast<uint32_t>(millis());
 	if (now - lastOutputMs < OUTPUT_PERIOD_MS) return;
 	lastOutputMs = now;
-	float distance1, distance2, front;
-	const bool valid1 = tof::readDistance(devices::tof1, distance1);
-	const bool valid2 = tof::readDistance(devices::tof2, distance2);
+	float distance1 = NAN, distance2 = NAN, front;
+	const bool valid1 = tof::firstInitialized && tof::readDistance(devices::tof1, distance1);
+	const bool valid2 = tof::secondInitialized && tof::readDistance(devices::tof2, distance2);
+	// 与正式运行共用有效距离上限；通信失败、非正数或超过上限均提示异常。
+	status_led::update(!valid1 || !isfinite(distance1) || distance1 <= 0 || distance1 > calibration::TOF_MAX_DISTANCE_M,
+		!valid2 || !isfinite(distance2) || distance2 <= 0 || distance2 > calibration::TOF_MAX_DISTANCE_M);
 	const bool validFront = ultrasonic::readDistance(front, 12000UL);
 
 	Serial.print(F("t_ms=")); Serial.print(now);
-	Serial.print(F(" tof1=")); printDistance(distance1, valid1);
-	Serial.print(F(" tof2=")); printDistance(distance2, valid2);
+	Serial.print(F(" tof1="));
+	if (tof::firstInitialized) printDistance(distance1, valid1);
+	else Serial.print(F("INIT_FAILED"));
+	Serial.print(F(" tof2="));
+	if (tof::secondInitialized) printDistance(distance2, valid2);
+	else Serial.print(F("INIT_FAILED"));
 	Serial.print(F(" front=")); printDistance(front, validFront);
 	Serial.println();
 }

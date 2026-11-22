@@ -405,6 +405,7 @@
         "${arduinoCore}/variants/esp32s3",
         "${arduinoCore}/libraries/WiFi/src",
         "${arduinoCore}/libraries/Network/src",
+        "${arduinoCore}/libraries/Preferences/src",
         "${env:USERPROFILE}/Documents/Arduino/libraries/ESP32Servo/src"
       ],
       "forcedInclude": [

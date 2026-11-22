@@ -4,6 +4,7 @@
 #include <esp_http_server.h>
 #include "control.h"
 #include "web_debug_page.h"
+#include "boot_log.h"
 
 namespace web_debug {
 struct Snapshot {
@@ -72,6 +73,13 @@ inline esp_err_t page(httpd_req_t *req) {
 	return httpd_resp_send(req, dashboardPage, sizeof(dashboardPage)-1);
 }
 
+inline esp_err_t boots(httpd_req_t *req) {
+	const String json = boot_log::json();
+	httpd_resp_set_type(req, "application/json; charset=utf-8");
+	httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+	return httpd_resp_send(req, json.c_str(), json.length());
+}
+
 inline void begin() {
 	if (!WiFi.softAP("S3-Car-Debug", "s3carview")) {
 		Serial.println("Debug Wi-Fi unavailable");
@@ -80,16 +88,20 @@ inline void begin() {
 	httpd_handle_t server = nullptr;
 	httpd_config_t config = HTTPD_DEFAULT_CONFIG();
 	config.lru_purge_enable = true;
-	httpd_uri_t home = {}, api = {};
+	httpd_uri_t home = {}, api = {}, history = {};
 	home.uri = "/";
 	home.method = HTTP_GET;
 	home.handler = page;
 	api.uri = "/telemetry";
 	api.method = HTTP_GET;
 	api.handler = telemetry;
+	history.uri = "/boots";
+	history.method = HTTP_GET;
+	history.handler = boots;
 	if (httpd_start(&server, &config) != ESP_OK ||
 	    httpd_register_uri_handler(server, &home) != ESP_OK ||
-	    httpd_register_uri_handler(server, &api) != ESP_OK) {
+	    httpd_register_uri_handler(server, &api) != ESP_OK ||
+	    httpd_register_uri_handler(server, &history) != ESP_OK) {
 		if (server) httpd_stop(server);
 		WiFi.softAPdisconnect(true);
 		Serial.println("Debug web server unavailable");
