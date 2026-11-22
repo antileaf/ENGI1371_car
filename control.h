@@ -183,13 +183,13 @@ constexpr uint32_t RESTART_WAIT_US = 2000000UL; // 连续畅通 2 秒后重新�
 constexpr uint32_t OBSTACLE_LOCK_US = 60000000UL; // 连续受阻 60 秒后锁定停机
 
 // PWM 表示驱动力而非实测车速；两侧独立配置前进指令绝对值。
-constexpr int MAX_PWM = 150;
+constexpr int MAX_PWM = 160;
 static_assert(calibration::MIN_DRIVE_PWM > 0 && calibration::MIN_DRIVE_PWM <= MAX_PWM,
 	"Minimum drive PWM must be within the allowed drive range");
 constexpr float PWM_RAMP_PER_SECOND = 40.0f;
 constexpr float MAX_STEER_RATE = 45.0f * PI / 180.0f;
-// 误差为两侧距离差除以总距离。按总间隙 0.60 m 换算旧增益，窄道纠偏更强。
-constexpr float OFFSET_KP = 1.2f, OFFSET_KD = 0.45f;
+// P：看位置 D：看趋势
+constexpr float OFFSET_KP = 2.5f, OFFSET_KD = 0.8f;
 constexpr float OFFSET_DEADBAND = 0.01f; // 仅 P 项使用死区，过中心时保留 D 项
 constexpr float OFFSET_FILTER_SECONDS = 0.10f, RATE_FILTER_SECONDS = 0.12f;
 constexpr float MAX_OFFSET_RATE = 1.0f; // 限制突变引起的 D 项

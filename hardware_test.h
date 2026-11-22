@@ -91,4 +91,4 @@ inline void update() {
 	Serial.println();
 }
 
-} // hardware_test 命名空间结束
+} // namespace hardware_test
