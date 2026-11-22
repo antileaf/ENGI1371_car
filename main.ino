@@ -17,7 +17,7 @@
 #endif
 
 // true：传感器、电机联合测试，不执行其它逻辑
-constexpr bool hardware_test_mode = true;
+constexpr bool hardware_test_mode = false;
 // true：启用 Wi-Fi 调试网页。关闭时串口调试仍可用。
 constexpr bool enable_web_debug = ENABLE_WEB_DEBUG;
 // 前进 PWM 在 calibration.h 的 DEFAULT_PWM_A/B 中配置。
