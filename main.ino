@@ -24,10 +24,12 @@ constexpr bool enable_web_debug = ENABLE_WEB_DEBUG;
 
 static bool initializationFailed = false;
 
-constexpr uint8_t MAX_INITIALIZATION_ATTEMPTS = 3;
-constexpr uint32_t INITIALIZATION_RETRY_MS = 2000;
-static uint8_t initializationAttempts = 0;
-static uint32_t initializationFailedAt = 0;
+constexpr uint32_t INITIALIZATION_WINDOW_US = 2000000UL;
+constexpr uint32_t INITIALIZATION_PAUSE_US = 2000000UL;
+static uint32_t initializationAttempts = 0;
+static uint32_t initializationPhaseStartedUs = 0;
+static uint32_t lastInitializationAttemptUs = 0;
+static bool initializationPaused = false;
 
 void attemptInitialization() {
 	status_led::show(status_led::State::Initializing);
@@ -73,12 +75,10 @@ void attemptInitialization() {
 		motor::stopMotors();
 		servo::disable();
 
-		initializationFailedAt = static_cast<uint32_t>(millis());
-
-		if (initializationAttempts < MAX_INITIALIZATION_ATTEMPTS)
-			Serial.println(F("Initialization failed. Retrying in 2 seconds."));
-		else
-			Serial.println(F("Initialization failed 3 times. Vehicle stopped."));
+		initializationPhaseStartedUs = static_cast<uint32_t>(micros());
+		lastInitializationAttemptUs = initializationPhaseStartedUs;
+		initializationPaused = false;
+		Serial.println(F("Initialization failed. Retrying at control sampling interval for 2 seconds."));
 	}
 	else if (!initializationFailed) {
 		Serial.println(F("Initialization succeeded."));
@@ -88,6 +88,52 @@ void attemptInitialization() {
 	if constexpr (enable_web_debug)
 		web_debug::publish(initializationFailed, hardware_test_mode);
 #endif
+}
+
+// 仅恢复故障侧，不反复重置正常模块或拨动舵机。
+void recoverInitialization() {
+	++initializationAttempts;
+	if (!tof::firstInitialized || !tof::secondInitialized)
+		tof::retryFailedSensors();
+	control::recordTofInitFailure(tof::firstInitialized, tof::secondInitialized);
+	status_led::update(!tof::firstInitialized, !tof::secondInitialized);
+	if (tof::firstInitialized && tof::secondInitialized && control::start()) {
+		initializationFailed = false;
+		Serial.println(F("Initialization recovered. Control warming up."));
+	}
+	else {
+		motor::stopMotors();
+		servo::disable();
+
+	}
+
+}
+
+// 2 秒尝试窗口与 2 秒休息交替；初始化本身耗时超过周期时不追赶补执行。
+void updateInitializationRecovery() {
+	const uint32_t now = static_cast<uint32_t>(micros());
+	if (initializationPaused) {
+		if (now - initializationPhaseStartedUs < INITIALIZATION_PAUSE_US) return;
+		initializationPaused = false;
+		initializationPhaseStartedUs = now;
+		lastInitializationAttemptUs = now - control::CONTROL_PERIOD_US;
+		Serial.println(F("Initialization: starting next 2-second retry window."));
+	}
+	if (now - initializationPhaseStartedUs >= INITIALIZATION_WINDOW_US) {
+		initializationPaused = true;
+		initializationPhaseStartedUs = now;
+		Serial.println(F("Initialization: pausing retries for 2 seconds."));
+		return;
+	}
+	if (now - lastInitializationAttemptUs < control::CONTROL_PERIOD_US) return;
+	lastInitializationAttemptUs = now;
+	recoverInitialization();
+	const uint32_t finished = static_cast<uint32_t>(micros());
+	if (initializationFailed && finished - initializationPhaseStartedUs >= INITIALIZATION_WINDOW_US) {
+		initializationPaused = true;
+		initializationPhaseStartedUs = finished;
+		Serial.println(F("Initialization: pausing retries for 2 seconds."));
+	}
 }
 
 void setup() {
@@ -121,18 +167,20 @@ void loop() {
 	}
 	serial_commands::update(false);
 	if (initializationFailed) {
-		// 自动重试仅用于正式运行，硬件测试保留首次失败现场。
-		if constexpr (!hardware_test_mode) {
-			if (initializationAttempts < MAX_INITIALIZATION_ATTEMPTS &&
-					static_cast<uint32_t>(millis()) - initializationFailedAt >= INITIALIZATION_RETRY_MS)
-				attemptInitialization();
-		}
+		updateInitializationRecovery();
+		runtime_debug::update();
+#if ENABLE_WEB_DEBUG
+		if constexpr (enable_web_debug) web_debug::publish(initializationFailed, false);
+#endif
 		return;
 	}
 
 	control::update();
 	const uint8_t tofIssues = control::getTelemetry().sensorIssues;
-	status_led::update(tofIssues & control::ToF1Invalid, tofIssues & control::ToF2Invalid);
+	const control::Status ledStatus = control::getTelemetry().status;
+	const bool obstacleStopped = ledStatus == control::Status::Obstacle ||
+		ledStatus == control::Status::WaitingToRestart || ledStatus == control::Status::ObstacleLocked;
+	status_led::update(tofIssues & control::ToF1Invalid, tofIssues & control::ToF2Invalid, obstacleStopped);
 
 #if ENABLE_WEB_DEBUG
 	if constexpr (enable_web_debug)

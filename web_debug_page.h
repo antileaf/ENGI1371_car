@@ -30,7 +30,7 @@ for(const [title,rows] of groups){
  card.innerHTML='<h2>'+title+'</h2><dl>'+rows.map(([key,label])=>'<dt>'+label+'</dt><dd id="'+key+'">—</dd>').join('')+'</dl>';
  el('grid').append(card);
 }
-const states={0:'已停止',1:'预热中',3:'运行中',4:'障碍停车',5:'等待重新启动',6:'缺少标定',7:'传感器故障',8:'控制时序故障',11:'目标无效',12:'障碍锁定'};
+const states={0:'已停止',1:'预热中',3:'运行中',4:'障碍停车',5:'等待重新启动',6:'缺少标定',7:'传感器故障',8:'控制时序故障',11:'目标无效',12:'障碍锁定',13:'靠边退让：停车',14:'靠边退让：反向满舵',15:'靠边退让：倒车',16:'靠边退让：停稳采样',17:'靠边退让：前进转向'};
 let history=[],previousMs=-1;
 function draw(now){
  history=history.filter(s=>now-s.ms<=30000);
@@ -55,7 +55,7 @@ async function poll(){
    if(!res.ok)throw Error();
    const s=await res.json(),live=s.mode==='control'&&s.ms>0;
    el('state').textContent=s.mode==='failed'?'初始化失败 · 已停车':s.mode==='test'?'硬件测试模式':s.ms===0?'正在初始化':states[s.status]||'未知状态';
-   const issues=[[1,'ToF 1 异常'],[2,'ToF 2 异常'],[4,'超声波无回波'],[8,'超声波回波无效']].filter(([bit])=>s.issues&bit);
+   const issues=[[1,'ToF 1 不可用'],[2,'ToF 2 不可用'],[4,'超声波无回波'],[8,'超声波回波无效'],[16,'ToF 1 距离过远'],[32,'ToF 2 距离过远']].filter(([bit])=>s.issues&bit);
    if(issues.length) el('state').textContent+=' · '+issues.map(([,label])=>label).join('、');
    el('link').textContent='已连接 · 控制器快照 '+(s.ms/1000).toFixed(1)+' s';
    for(const [,rows] of groups)for(const [key,,unit] of rows){

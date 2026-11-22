@@ -4,7 +4,10 @@
 #include <stdio.h>
 #include <math.h>
 #define RGB_BUILTIN 48
-inline void rgbLedWrite(uint8_t, uint8_t, uint8_t, uint8_t) {}
+static uint8_t rgbRed = 0, rgbGreen = 0, rgbBlue = 0;
+inline void rgbLedWrite(uint8_t, uint8_t red, uint8_t green, uint8_t blue) {
+	rgbRed = red; rgbGreen = green; rgbBlue = blue;
+}
 constexpr int A0=14,A1=15,A2=16,A3=17,A4=18,A5=19,SDA=18,SCL=19;
 constexpr int LOW=0,HIGH=1,INPUT=0,OUTPUT=1,INPUT_PULLUP=2,RISING=3,NOT_AN_INTERRUPT=-1;
 uint32_t nowUs=0;

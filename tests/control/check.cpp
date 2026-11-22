@@ -3,6 +3,7 @@
 #include <cassert>
 #include <cstdio>
 using namespace control;
+constexpr unsigned long OBSTACLE_ECHO_US = static_cast<unsigned long>(STOP_DISTANCE * .8f * 5800);
 void tick() { nowUs+=CONTROL_PERIOD_US; update(); }
 void reset(uint32_t time=0) {
 	tof::firstInitialized=tof::secondInitialized=true;
@@ -15,15 +16,38 @@ void reset(uint32_t time=0) {
 	assert(start(100,110));
 }
 void obstacle() {
-	echoUs=1000;
+	echoUs=OBSTACLE_ECHO_US;
 	for(int i=0;i<OBSTACLE_CONFIRM_FRAMES;++i) tick();
 	assert(getTelemetry().status==Status::Obstacle);
 	assert(getTelemetry().pwmA==0 && getTelemetry().pwmB==0);
 }
 int main() {
+	// 距离过远按上限参与控制，不触发通信故障、重初始化或降速。
+	reset();
+	devices::tof1.mm = devices::tof2.mm = static_cast<uint16_t>(calibration::TOF_MAX_DISTANCE_M * 1000);
+	tick(); assert(getTelemetry().sensorIssues == 0);
+	devices::tof2.mm += 1;
+	for (int i=0; i<10; ++i) tick();
+	assert(getTelemetry().sensorIssues == ToF2OutOfRange);
+	assert(getTelemetry().status == Status::Running && getTelemetry().pwmA > 0 && getTelemetry().pwmB > 0);
+	assert(fabsf(getTelemetry().rawOffset) < 1e-6f);
+	assert(tof::secondInitialized && tof::secondFailures == 0);
+	devices::tof1.mm = 300;
+	devices::tof2.mm = 8000;
+	tick();
+	const float expectedOffset = (calibration::TOF_MAX_DISTANCE_M - .3f) / (calibration::TOF_MAX_DISTANCE_M + .3f);
+	assert(fabsf(getTelemetry().rawOffset - (TOF1_IS_LEFT ? expectedOffset : -expectedOffset)) < 1e-5f);
+	assert((TOF1_IS_LEFT ? getTelemetry().tofRight : getTelemetry().tofLeft) == 8.0f);
+	devices::tof1.timeout = true; tick();
+	assert(getTelemetry().sensorIssues == (ToF1Invalid | ToF2OutOfRange));
+	assert(getTelemetry().pwmA == calibration::TOF_DEGRADED_PWM && getTelemetry().pwmB == calibration::TOF_DEGRADED_PWM);
+	devices::tof1.timeout = false; devices::tof2.mm = 300; tick();
+	assert(getTelemetry().sensorIssues == 0);
 	reset();
 	assert(start(1,1));
 	for(int i=0;i<HISTORY_SIZE;++i) tick();
+	assert(pwm[ports::ENA] >= calibration::START_PWM && pwm[ports::ENA] < calibration::MIN_DRIVE_PWM);
+	for(int i=0;i<10;++i) tick();
 	assert(pwm[ports::ENA]==calibration::MIN_DRIVE_PWM && pwm[ports::ENB]==calibration::MIN_DRIVE_PWM);
 	stop();
 	assert(pwm[ports::ENA]==0 && pwm[ports::ENB]==0);
@@ -36,7 +60,7 @@ int main() {
 	devices::tof2.last_status=1;
 	tick();
 	assert(getTelemetry().status==Status::Running && getTelemetry().sensorIssues==ToF2Invalid);
-	assert(pwm[ports::ENA]==calibration::MIN_DRIVE_PWM && pwm[ports::ENB]==calibration::MIN_DRIVE_PWM);
+	assert(pwm[ports::ENA]==calibration::TOF_DEGRADED_PWM && pwm[ports::ENB]==calibration::TOF_DEGRADED_PWM);
 	devices::tof1.timeout=true; echoUs=5; tick();
 	assert(getTelemetry().sensorIssues==(ToF1Invalid|ToF2Invalid|FrontInvalid));
 	for(int i=0;i<OBSTACLE_CONFIRM_FRAMES;++i) tick();
@@ -93,21 +117,22 @@ int main() {
 	assert(getTelemetry().pwmB > 110 && getTelemetry().pwmB < MAX_PWM);
 	assert(fabsf(steadyAngle(250, 150) + narrow) < 1e-5f);
 	assert(getTelemetry().pwmA > 100 && getTelemetry().pwmA <= MAX_PWM && getTelemetry().pwmB < 110);
-	steadyAngle(100, 400);
+	// 保持 4:1 满舵比例，但近侧不小于 0.2 m，单独验证差速而不触发退让。
+	steadyAngle(200, 800);
 	assert(getTelemetry().pwmB == MAX_PWM);
-	steadyAngle(400, 100);
+	steadyAngle(800, 200);
 	assert(getTelemetry().pwmA == MAX_PWM);
 	devices::tof1.timeout = true;
 	tick();
-	assert(getTelemetry().pwmA == calibration::MIN_DRIVE_PWM && getTelemetry().pwmB == calibration::MIN_DRIVE_PWM);
+	assert(getTelemetry().pwmA == calibration::TOF_DEGRADED_PWM && getTelemetry().pwmB == calibration::TOF_DEGRADED_PWM);
 	reset();
-	echoUs=1000; tick(); tick();
+	echoUs=OBSTACLE_ECHO_US; tick(); tick();
 	assert(getTelemetry().status!=Status::Obstacle);
 	echoUs=0; tick(); assert(runtime::obstacleFrames==0);
 	obstacle();
 	echoUs=0; tick(); assert(getTelemetry().status==Status::WaitingToRestart);
 	for(int i=0;i<10;++i) tick();
-	echoUs=1000; tick(); assert(getTelemetry().status==Status::Obstacle);
+	echoUs=OBSTACLE_ECHO_US; tick(); assert(getTelemetry().status==Status::Obstacle);
 	echoUs=0; tick();
 	for(int i=0;i<34;++i) tick();
 	assert(getTelemetry().status==Status::WarmingUp);
@@ -139,5 +164,22 @@ int main() {
 	nowUs+=1000000; runtime_debug::update();
 	assert(Serial.output.str().find("offset_rate_per_s=")!=std::string::npos);
 	assert(Serial.output.str().find("encL_mps=")==std::string::npos);
+	// 障碍停车、等待重启和锁定期间继续刷新 ToF，不产生驱动输出。
+	reset(); obstacle();
+	const int stoppedAngle = devices::servo.angle;
+	devices::tof1.mm = 450; devices::tof2.timeout = true; tick();
+	assert(getTelemetry().sensorIssues & ToF2Invalid);
+	assert((TOF1_IS_LEFT ? getTelemetry().tofLeft : getTelemetry().tofRight) > .44f);
+	assert(getTelemetry().pwmA == 0 && getTelemetry().pwmB == 0 && devices::servo.angle == stoppedAngle);
+	devices::tof2.timeout = false; echoUs = 0; tick();
+	assert(getTelemetry().status == Status::WaitingToRestart && getTelemetry().sensorIssues == FrontNoEcho);
+	devices::tof1.mm = 500; tick();
+	assert((TOF1_IS_LEFT ? getTelemetry().tofLeft : getTelemetry().tofRight) == .5f);
+	stop(Status::ObstacleLocked); servo::disable();
+	devices::tof2.timeout = true;
+	for (int i=0; i<50; ++i) tick();
+	assert(tof::secondInitialized && !(getTelemetry().sensorIssues & ToF2Invalid));
+	assert(getTelemetry().status == Status::ObstacleLocked && !devices::servo.enabled);
+	assert(getTelemetry().pwmA == 0 && getTelemetry().pwmB == 0);
 	puts("ToF PD, PWM ramp, obstacle recovery/lock and fault checks passed");
 }

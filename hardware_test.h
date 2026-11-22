@@ -73,18 +73,20 @@ inline void update() {
 	float distance1 = NAN, distance2 = NAN, front;
 	const bool valid1 = tof::firstInitialized && tof::readDistance(devices::tof1, distance1);
 	const bool valid2 = tof::secondInitialized && tof::readDistance(devices::tof2, distance2);
-	// 与正式运行共用有效距离上限；通信失败、非正数或超过上限均提示异常。
-	status_led::update(!valid1 || !isfinite(distance1) || distance1 <= 0 || distance1 > calibration::TOF_MAX_DISTANCE_M,
-		!valid2 || !isfinite(distance2) || distance2 <= 0 || distance2 > calibration::TOF_MAX_DISTANCE_M);
+	// 距离过远不表示传感器不可用，不点亮故障灯。
+	status_led::update(!valid1 || !isfinite(distance1) || distance1 <= 0,
+		!valid2 || !isfinite(distance2) || distance2 <= 0);
 	const bool validFront = ultrasonic::readDistance(front, 12000UL);
 
 	Serial.print(F("t_ms=")); Serial.print(now);
 	Serial.print(F(" tof1="));
 	if (tof::firstInitialized) printDistance(distance1, valid1);
 	else Serial.print(F("INIT_FAILED"));
+	if (valid1 && distance1 > calibration::TOF_MAX_DISTANCE_M) Serial.print(F("(OUT_OF_RANGE)"));
 	Serial.print(F(" tof2="));
 	if (tof::secondInitialized) printDistance(distance2, valid2);
 	else Serial.print(F("INIT_FAILED"));
+	if (valid2 && distance2 > calibration::TOF_MAX_DISTANCE_M) Serial.print(F("(OUT_OF_RANGE)"));
 	Serial.print(F(" front=")); printDistance(front, validFront);
 	Serial.println();
 }

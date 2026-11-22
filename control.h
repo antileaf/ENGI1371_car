@@ -174,20 +174,29 @@ inline bool servoAngleToWheel(float servoDeg, float &phiRad) {
 
 constexpr uint32_t CONTROL_PERIOD_US = 60000UL;
 constexpr uint32_t MAX_CONTROL_GAP_US = 200000UL;
-constexpr float STOP_DISTANCE = 0.25f; // 需按实测制动距离调整
+constexpr float STOP_DISTANCE = 0.12f; // 需按实测制动距离调整
 constexpr uint8_t OBSTACLE_CONFIRM_FRAMES = 3; // 连续近距离有效回波达到此帧数才停车
 static_assert(OBSTACLE_CONFIRM_FRAMES > 0, "Obstacle confirmation requires at least one frame");
-constexpr float RESUME_DISTANCE = 0.30f; // 恢复阈值高于停车阈值，避免反复启停
+constexpr float RESUME_DISTANCE = 0.20f; // 恢复阈值高于停车阈值，避免反复启停
 static_assert(RESUME_DISTANCE > STOP_DISTANCE, "Resume distance must exceed stop distance");
 constexpr uint32_t RESTART_WAIT_US = 2000000UL; // 连续畅通 2 秒后重新采样起步
 constexpr uint32_t OBSTACLE_LOCK_US = 60000000UL; // 连续受阻 60 秒后锁定停机
 
 // PWM 表示驱动力而非实测车速；两侧独立配置前进指令绝对值。
-constexpr int MAX_PWM = 160;
+constexpr int MAX_PWM = 180;
+static_assert(calibration::EDGE_REVERSE_PWM > 0 && calibration::EDGE_REVERSE_PWM <= MAX_PWM,
+	"Reverse PWM must be within the allowed drive range");
+static_assert(calibration::EDGE_DISTANCE_RATIO > 1 && calibration::EDGE_NEAR_M > 0 &&
+	calibration::EDGE_REVERSE_US > 0,
+	"Invalid edge recovery configuration");
+static_assert(calibration::TOF_DEGRADED_PWM > 0 && calibration::TOF_DEGRADED_PWM <= MAX_PWM,
+	"ToF degraded PWM must be within the allowed drive range");
 static_assert(calibration::MIN_DRIVE_PWM > 0 && calibration::MIN_DRIVE_PWM <= MAX_PWM,
 	"Minimum drive PWM must be within the allowed drive range");
-constexpr float PWM_RAMP_PER_SECOND = 40.0f;
-constexpr float MAX_STEER_RATE = 45.0f * PI / 180.0f;
+static_assert(calibration::START_PWM > 0 && calibration::START_PWM <= calibration::MIN_DRIVE_PWM,
+	"Start PWM must be positive and no greater than minimum drive PWM");
+constexpr float PWM_RAMP_PER_SECOND = 60.0f;
+constexpr float MAX_STEER_RATE = 90.0f * PI / 180.0f;
 // P：看位置 D：看趋势
 constexpr float OFFSET_KP = 2.5f, OFFSET_KD = 0.8f;
 constexpr float OFFSET_DEADBAND = 0.01f; // 仅 P 项使用死区，过中心时保留 D 项
@@ -207,9 +216,14 @@ enum class Status {
 	TimingFault = 8,
 	InvalidTarget = 11,
 	ObstacleLocked = 12,
+	EdgeStopping = 13, EdgeReverseSteering = 14, EdgeReversing = 15,
+	EdgeSettling = 16, EdgeForwardSteering = 17,
 };
 
-enum SensorIssue : uint8_t { ToF1Invalid = 1, ToF2Invalid = 2, FrontNoEcho = 4, FrontInvalid = 8 };
+enum SensorIssue : uint8_t {
+	ToF1Invalid = 1, ToF2Invalid = 2, FrontNoEcho = 4, FrontInvalid = 8,
+	ToF1OutOfRange = 16, ToF2OutOfRange = 32 // 通信正常，距离按上限参与控制；不点亮故障灯。
+};
 
 struct Telemetry {
 	uint8_t sensorIssues = 0;
@@ -231,6 +245,10 @@ static uint32_t lastSampleUs = 0, lastObstacleCheckUs = 0, clearSinceUs = 0, blo
 static bool trackingBlocked = false;
 static int requestedA = DEFAULT_PWM_A, requestedB = DEFAULT_PWM_B;
 static float ramp = 0;
+static int edgeSide = 0;
+static uint32_t edgeSince = 0, edgePhaseSince = 0, edgeCooldownSince = 0;
+static bool edgeCooldown = false;
+static float edgeReversePhi = 0;
 }
 
 inline void recordTofInitFailure(bool firstReady, bool secondReady) {
@@ -243,6 +261,7 @@ inline const Telemetry &getTelemetry() { return runtime::telemetry; }
 inline void stop(Status reason = Status::Stopped) {
 	motor::stopMotors();
 	runtime::active = false; runtime::ramp = 0; runtime::obstacleFrames = 0;
+	runtime::edgeSide = 0;
 	runtime::lastObstacleCheckUs = static_cast<uint32_t>(micros());
 	runtime::clearSinceUs = 0;
 	runtime::trackingBlocked = reason == Status::Obstacle;
@@ -297,6 +316,27 @@ inline bool sampleFront() {
 		return false;
 	}
 	return true;
+}
+
+inline void sampleTof() {
+	auto &telemetry = runtime::telemetry;
+	float first, second;
+	tof::readDistances(first, second);
+	telemetry.sensorIssues &= ~(ToF1Invalid | ToF2Invalid | ToF1OutOfRange | ToF2OutOfRange);
+	if (!isfinite(first) || first <= 0) {
+		telemetry.sensorIssues |= ToF1Invalid;
+		first = NAN;
+	}
+	else if (first > calibration::TOF_MAX_DISTANCE_M)
+		telemetry.sensorIssues |= ToF1OutOfRange;
+	if (!isfinite(second) || second <= 0) {
+		telemetry.sensorIssues |= ToF2Invalid;
+		second = NAN;
+	}
+	else if (second > calibration::TOF_MAX_DISTANCE_M)
+		telemetry.sensorIssues |= ToF2OutOfRange;
+	telemetry.tofLeft = TOF1_IS_LEFT ? first : second;
+	telemetry.tofRight = TOF1_IS_LEFT ? second : first;
 }
 
 inline void updateObstacleRecovery() {
@@ -410,18 +450,147 @@ inline float steeringDemand(float offset, float rate) {
 	return constrain(desiredPhi, -MAX_STEER, MAX_STEER);
 }
 
+inline bool edgeManeuver() {
+	const Status s = runtime::telemetry.status;
+	return s >= Status::EdgeStopping && s <= Status::EdgeForwardSteering;
+}
+
+inline bool edgeSteer(float phi) {
+	float degrees;
+	if (!wheelAngleToServo(phi, degrees)) { stop(Status::CalibrationMissing); return false; }
+	servo::write(static_cast<int>(lroundf(degrees)));
+	runtime::telemetry.appliedPhi = runtime::telemetry.desiredPhi = phi;
+	runtime::telemetry.servoDegrees = degrees;
+	return true;
+}
+
+inline void edgePhase(Status phase) {
+	motor::stopMotors();
+	runtime::telemetry.pwmA = runtime::telemetry.pwmB = 0;
+	runtime::telemetry.status = phase;
+	runtime::edgePhaseSince = static_cast<uint32_t>(micros());
+}
+
+inline bool detectEdge(uint32_t now) {
+	using namespace runtime;
+	using namespace calibration;
+	if (!EDGE_RECOVERY_ENABLED) return false;
+	if (telemetry.sensorIssues & (ToF1Invalid | ToF2Invalid | FrontInvalid) ||
+		telemetry.status != Status::Running || !telemetry.pwmA || !telemetry.pwmB) {
+		edgeSide = 0; return false;
+	}
+	const float left = fminf(telemetry.tofLeft, TOF_MAX_DISTANCE_M);
+	const float right = fminf(telemetry.tofRight, TOF_MAX_DISTANCE_M);
+	const int side = left < EDGE_NEAR_M && right > left * EDGE_DISTANCE_RATIO ? 1 :
+		(right < EDGE_NEAR_M && left > right * EDGE_DISTANCE_RATIO ? -1 : 0);
+	if (!side) {
+		edgeSide = 0;
+		return false;
+	}
+	if (edgeCooldown && now - edgeCooldownSince < EDGE_COOLDOWN_US) { edgeSide = 0; return false; }
+	edgeCooldown = false;
+	if (side != edgeSide) { edgeSide = side; edgeSince = now; return false; }
+	if (now - edgeSince < EDGE_CONFIRM_US) return false;
+	edgeReversePhi = side * MAX_STEER; // 左侧近：前进需右转，倒车先左满舵。
+	edgeSide = 0;
+	sampleCount = 0; ramp = 0;
+	telemetry.pTerm = telemetry.dTerm = telemetry.offsetRate = 0;
+	edgePhase(Status::EdgeStopping);
+	return true;
+}
+
+inline void updateEdgeRecovery() {
+	using namespace runtime;
+	using namespace calibration;
+	uint32_t now = static_cast<uint32_t>(micros());
+	// 倒车到时先停车，再做可能阻塞的传感器读取。
+	if (telemetry.status == Status::EdgeReversing && now - edgePhaseSince >= EDGE_REVERSE_US)
+		edgePhase(Status::EdgeSettling);
+	if (now - lastSampleUs > MAX_CONTROL_GAP_US) { stop(Status::TimingFault); return; }
+	if (now - lastSampleUs < CONTROL_PERIOD_US) return;
+	const uint32_t began = now;
+	sampleTof();
+	const bool echo = sampleFront();
+	now = static_cast<uint32_t>(micros());
+	lastSampleUs = now;
+	if (now - began > MAX_CONTROL_GAP_US) { stop(Status::TimingFault); return; }
+	if (telemetry.sensorIssues & (ToF1Invalid | ToF2Invalid | FrontInvalid)) {
+		stop(Status::SensorFault); return;
+	}
+	// 前方障碍优先，退让动作不得覆盖障碍停车。
+	if (echo && telemetry.frontDistance <= STOP_DISTANCE) {
+		if (++obstacleFrames >= OBSTACLE_CONFIRM_FRAMES) { stop(Status::Obstacle); return; }
+	} else obstacleFrames = 0;
+	const uint32_t elapsed = now - edgePhaseSince;
+	switch (telemetry.status) {
+		case Status::EdgeStopping:
+			if (elapsed >= EDGE_STOP_US && edgeSteer(edgeReversePhi)) edgePhase(Status::EdgeReverseSteering);
+			break;
+		case Status::EdgeReverseSteering:
+			if (elapsed >= EDGE_SERVO_WAIT_US && !obstacleFrames) {
+				edgePhase(Status::EdgeReversing);
+				telemetry.pwmA = telemetry.pwmB = EDGE_REVERSE_PWM;
+				motor::motorA(-EDGE_REVERSE_PWM * MOTOR_A_DIRECTION);
+				motor::motorB(-EDGE_REVERSE_PWM * MOTOR_B_DIRECTION);
+			}
+			break;
+		case Status::EdgeReversing:
+			if (elapsed >= EDGE_REVERSE_US) edgePhase(Status::EdgeSettling);
+			break;
+		case Status::EdgeSettling:
+			if (elapsed < EDGE_STOP_US) break;
+			{
+				const float left = fminf(telemetry.tofLeft, TOF_MAX_DISTANCE_M);
+				const float right = fminf(telemetry.tofRight, TOF_MAX_DISTANCE_M);
+				// 仅积累停稳后的距离，D 项不继承倒车历史。
+				observeOffset((right - left) / (right + left), now, CONTROL_PERIOD_US * 1e-6f);
+				if (sampleCount == HISTORY_SIZE) {
+					telemetry.offsetRate = 0;
+					if (edgeSteer(steeringDemand(telemetry.offset, 0))) edgePhase(Status::EdgeForwardSteering);
+				}
+			}
+			break;
+		case Status::EdgeForwardSteering:
+			if (elapsed >= EDGE_SERVO_WAIT_US && !obstacleFrames) {
+				sampleCount = 0; ramp = 0;
+				telemetry.offsetRate = telemetry.dTerm = 0;
+				telemetry.status = Status::WarmingUp;
+				edgeCooldown = true; edgeCooldownSince = now;
+			}
+			break;
+		default: break;
+	}
+}
+
 inline void update() {
 	using namespace runtime;
+	if (edgeManeuver()) { updateEdgeRecovery(); return; }
 
 	if (telemetry.status == Status::Obstacle ||
-			telemetry.status == Status::WaitingToRestart) {
-		updateObstacleRecovery();
+			telemetry.status == Status::WaitingToRestart || telemetry.status == Status::ObstacleLocked) {
+		if (static_cast<uint32_t>(micros()) - lastObstacleCheckUs < CONTROL_PERIOD_US) return;
+		if (tof::recoveryDue()) {
+			tof::retryFailedSensors();
+			// 重初始化期间没有持续观察道路，重新计算受阻和畅通时间。
+			lastObstacleCheckUs = static_cast<uint32_t>(micros());
+			trackingBlocked = false;
+			clearSinceUs = 0;
+			if (telemetry.status != Status::ObstacleLocked) telemetry.status = Status::Obstacle;
+			return;
+		}
+		// 停车期间只更新传感器缓存，不执行转向和驱动输出。
+		sampleTof();
+		if (telemetry.status == Status::ObstacleLocked)
+			lastObstacleCheckUs = static_cast<uint32_t>(micros());
+		else
+			updateObstacleRecovery();
 		return;
 	}
 
 	if (!active)
 		return;
 	if (tof::recoveryDue()) {
+		edgeSide = 0;
 		// 重初始化可能阻塞，先停车；完成后重新积累历史并走起步斜坡。
 		motor::stopMotors();
 		telemetry.pwmA = telemetry.pwmB = 0;
@@ -441,7 +610,6 @@ inline void update() {
 		return;
 	}
 
-	float first, second;
 	if (sampleFront() && telemetry.frontDistance <= STOP_DISTANCE) {
 		if (++obstacleFrames >= OBSTACLE_CONFIRM_FRAMES) {
 			stop(Status::Obstacle);
@@ -451,18 +619,7 @@ inline void update() {
 	else
 		obstacleFrames = 0;
 	
-	tof::readDistances(first, second);
-	telemetry.sensorIssues &= ~(ToF1Invalid | ToF2Invalid);
-	if (!isfinite(first) || first <= 0 || first > calibration::TOF_MAX_DISTANCE_M) {
-		telemetry.sensorIssues |= ToF1Invalid;
-		first = NAN;
-	}
-	if (!isfinite(second) || second <= 0 || second > calibration::TOF_MAX_DISTANCE_M) {
-		telemetry.sensorIssues |= ToF2Invalid;
-		second = NAN;
-	}
-	telemetry.tofLeft = TOF1_IS_LEFT ? first : second;
-	telemetry.tofRight = TOF1_IS_LEFT ? second : first;
+	sampleTof();
 
 
 	const uint32_t sampledAt = static_cast<uint32_t>(micros());
@@ -474,6 +631,7 @@ inline void update() {
 
 	const float dt = elapsed * 1e-6f;
 	lastSampleUs = sampledAt;
+	if (detectEdge(sampledAt)) return;
 	const bool tofFault = telemetry.sensorIssues & (ToF1Invalid | ToF2Invalid);
 	if (tofFault) {
 		sampleCount = 0;
@@ -482,8 +640,11 @@ inline void update() {
 		telemetry.desiredPhi = 0;
 	} else {
 		if (sampleCount == 0) telemetry.offsetRate = 0;
-		const float totalClearance = telemetry.tofRight + telemetry.tofLeft;
-		observeOffset((telemetry.tofRight - telemetry.tofLeft) / totalClearance, sampledAt, dt);
+		// 调试保留原始距离，控制计算对过远读数限幅，不触发降速或清空历史。
+		const float left = fminf(telemetry.tofLeft, calibration::TOF_MAX_DISTANCE_M);
+		const float right = fminf(telemetry.tofRight, calibration::TOF_MAX_DISTANCE_M);
+		const float totalClearance = right + left;
+		observeOffset((right - left) / totalClearance, sampledAt, dt);
 	}
 	const bool steeringReady = sampleCount == HISTORY_SIZE;
 	// Never launch from rest with missing history. While moving, steer toward centre.
@@ -505,19 +666,20 @@ inline void update() {
 	telemetry.appliedPhi = phi;
 	telemetry.servoDegrees = degrees;
 
-	// 从最低有效 PWM 起步，只对高于下限的部分做斜坡。
+	// 从独立的基础 PWM 起步，稳态目标仍遵守最低行驶 PWM。
 	const int floorPwm = calibration::MIN_DRIVE_PWM;
-	const int spanA = requestedA > floorPwm ? requestedA - floorPwm : 0;
-	const int spanB = requestedB > floorPwm ? requestedB - floorPwm : 0;
+	const int basePwm = calibration::START_PWM;
+	const int spanA = (requestedA > floorPwm ? requestedA : floorPwm) - basePwm;
+	const int spanB = (requestedB > floorPwm ? requestedB : floorPwm) - basePwm;
 	const int span = spanA > spanB ? spanA : spanB;
 	if (!steeringReady) ramp = 0;
 	else {
 		// 即使直行目标等于最低 PWM，转弯增速也要经过起步斜坡。
-		const int rampSpan = span > 0 ? span : MAX_PWM - floorPwm;
+		const int rampSpan = span > 0 ? span : MAX_PWM - basePwm;
 		ramp = rampSpan > 0 ? fminf(1.0f, ramp + PWM_RAMP_PER_SECOND * dt / rampSpan) : 1.0f;
 	}
-	telemetry.pwmA = !steeringReady ? floorPwm : floorPwm + static_cast<int>(lroundf(spanA * ramp));
-	telemetry.pwmB = !steeringReady ? floorPwm : floorPwm + static_cast<int>(lroundf(spanB * ramp));
+	telemetry.pwmA = !steeringReady ? calibration::TOF_DEGRADED_PWM : basePwm + static_cast<int>(lroundf(spanA * ramp));
+	telemetry.pwmB = !steeringReady ? calibration::TOF_DEGRADED_PWM : basePwm + static_cast<int>(lroundf(spanB * ramp));
 	// 依据限速后的前轮指令做开环差速：左转内轮 B，右转内轮 A。
 	if (steeringReady && phi != 0) {
 		int &innerPwm = phi > 0 ? telemetry.pwmB : telemetry.pwmA;
@@ -527,7 +689,7 @@ inline void update() {
 		const int reducedPwm = static_cast<int>(lroundf(innerPwm * (1.0f - reduction)));
 		innerPwm = reducedPwm < floorPwm ? floorPwm : reducedPwm;
 		// 满舵时外轮目标为 MAX_PWM，增量与起步进度同步。
-		const int outerTarget = phi > 0 ? floorPwm + spanA : floorPwm + spanB;
+		const int outerTarget = phi > 0 ? basePwm + spanA : basePwm + spanB;
 		const int boost = static_cast<int>(lroundf((MAX_PWM - outerTarget) * turn * ramp));
 		outerPwm = constrain(outerPwm + boost, floorPwm, MAX_PWM);
 	}

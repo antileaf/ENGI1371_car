@@ -34,3 +34,22 @@ Copy-Item (Join-Path $PSScriptRoot 'hardware.cpp') -Destination $checkDir
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & (Join-Path $checkDir 'hardware.exe')
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+# 使用真实主循环验证初始化重试；只替换 Flash 日志和关闭 Wi-Fi。
+Copy-Item (Join-Path $projectDir 'calibration.h') -Destination $checkDir
+Copy-Item (Join-Path $PSScriptRoot 'edge.cpp') -Destination $checkDir
+& g++ -std=c++11 -Wall -Wextra -I $mockDir (Join-Path $checkDir 'edge.cpp') -o (Join-Path $checkDir 'edge.exe')
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+& (Join-Path $checkDir 'edge.exe')
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+'#pragma once
+namespace boot_log { inline void begin() {} inline void printRecords() {} }' | Set-Content (Join-Path $checkDir 'boot_log.h') -Encoding utf8
+$sketch = Get-Content (Join-Path $projectDir 'main.ino') -Raw
+$sketch = $sketch.Replace('#define ENABLE_WEB_DEBUG 1', '#define ENABLE_WEB_DEBUG 0')
+$sketch = $sketch.Replace('constexpr bool hardware_test_mode = true;', 'constexpr bool hardware_test_mode = false;')
+$sketch | Set-Content (Join-Path $checkDir 'sketch.h') -Encoding utf8
+Copy-Item (Join-Path $PSScriptRoot 'initialization.cpp') -Destination $checkDir
+& g++ -std=c++17 -Wall -Wextra -I $mockDir (Join-Path $checkDir 'initialization.cpp') -o (Join-Path $checkDir 'initialization.exe')
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+& (Join-Path $checkDir 'initialization.exe')
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

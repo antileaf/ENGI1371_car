@@ -18,6 +18,11 @@ inline void printStatus(control::Status status) {
 		case control::Status::InvalidTarget: Serial.print(F("InvalidTarget")); break;
 		case control::Status::WaitingToRestart: Serial.print(F("WaitingToRestart")); break;
 		case control::Status::ObstacleLocked: Serial.print(F("ObstacleLocked")); break;
+		case control::Status::EdgeStopping: Serial.print(F("EdgeStopping")); break;
+		case control::Status::EdgeReverseSteering: Serial.print(F("EdgeReverseSteering")); break;
+		case control::Status::EdgeReversing: Serial.print(F("EdgeReversing")); break;
+		case control::Status::EdgeSettling: Serial.print(F("EdgeSettling")); break;
+		case control::Status::EdgeForwardSteering: Serial.print(F("EdgeForwardSteering")); break;
 	}
 }
 
@@ -25,6 +30,8 @@ inline void printSensorIssues(uint8_t issues) {
 	if (!issues) Serial.print(F("OK"));
 	if (issues & control::ToF1Invalid) Serial.print(F(" ToF1"));
 	if (issues & control::ToF2Invalid) Serial.print(F(" ToF2"));
+	if (issues & control::ToF1OutOfRange) Serial.print(F(" ToF1:OUT_OF_RANGE"));
+	if (issues & control::ToF2OutOfRange) Serial.print(F(" ToF2:OUT_OF_RANGE"));
 	if (issues & control::FrontNoEcho) Serial.print(F(" Ultrasonic:NO_ECHO"));
 	if (issues & control::FrontInvalid) Serial.print(F(" Ultrasonic:INVALID_ECHO"));
 }

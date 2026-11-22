@@ -2,6 +2,16 @@
 #include <cassert>
 #include <cstdio>
 int main() {
+	status_led::update(false, false, true);
+	assert(rgbGreen != 0);
+	nowUs = 1499000; status_led::update(false, false, true); assert(rgbGreen != 0);
+	nowUs = 1500000; status_led::update(false, false, true);
+	assert(rgbRed == 0 && rgbGreen == 0 && rgbBlue == 0);
+	nowUs = 2000000; status_led::update(true, true, true);
+	assert(rgbRed != 0 && rgbGreen == 0 && rgbBlue == 0);
+	nowUs = 3500000; status_led::update(false, false, true); assert(rgbGreen == 0);
+	status_led::update(false, false, false); assert(rgbGreen != 0);
+	nowUs = 0;
 	tof::firstInitialized=tof::secondInitialized=true;
 	servo::setup_late();
 	servo::disable();
